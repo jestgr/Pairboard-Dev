@@ -9421,9 +9421,16 @@ function buildFavDateMap() {
         const d   = new Date(anchorY, anchorM, startDay + offset);
         const key = localDKey(d.getFullYear(), d.getMonth(), d.getDate());
         if (!map.has(key)) map.set(key, []);
+
+        let position;
+        if (tripLen === 1)              position = 'single';
+        else if (offset === 0)          position = 'first';
+        else if (offset === tripLen - 1) position = 'last';
+        else                            position = 'middle';
+
         // Avoid duplicate entries for the same pairing on the same day
         if (!map.get(key).some(e => e.number === p.number)) {
-          map.get(key).push({ number: p.number, color });
+          map.get(key).push({ number: p.number, color, position });
         }
       }
     });
@@ -9690,7 +9697,7 @@ function renderCalendar() {
 
     // Heat map — only show for bid period days, percentile-based levels
     const count = inBidPeriod || isThisMonth ? (dayCountMap.get(dateKey) || 0) : 0;
-    if (count > 0 && (isThisMonth || inBidPeriod)) {
+    if (!_calFavMode && count > 0 && (isThisMonth || inBidPeriod)) {
       if      (count >  p80) cell.classList.add('heat-4');
       else if (count >= p60) cell.classList.add('heat-3');
       else if (count >= p40) cell.classList.add('heat-2');
@@ -9705,7 +9712,7 @@ function renderCalendar() {
     cell.appendChild(dayNum);
 
     // Heat count badge — only for bid period / current month days
-    if (count > 0 && (isThisMonth || inBidPeriod)) {
+    if (!_calFavMode && count > 0 && (isThisMonth || inBidPeriod)) {
       const badge = document.createElement('div');
       badge.className = 'cal-heat-count';
       badge.textContent = count;
@@ -9724,15 +9731,38 @@ function renderCalendar() {
     // Favorite trip pills
     if (favDateMap && (isThisMonth || inBidPeriod)) {
       const entries = favDateMap.get(dateKey) || [];
-      const MAX_VISIBLE = 2;
-      entries.slice(0, MAX_VISIBLE).forEach(({ number, color }) => {
+      entries.forEach(({ number, color, position }) => {
+        const isFirst = position === 'first' || position === 'single';
+        const isLast  = position === 'last'  || position === 'single';
+
         const pill = document.createElement('div');
         pill.className = 'cal-fav-pill';
-        pill.textContent = `#${number}`;
-        pill.style.background   = color.bg;
-        pill.style.borderLeft   = `3px solid ${color.border}`;
-        pill.style.color        = color.text;
+        pill.style.background = color.bg;
+        pill.style.color      = color.text;
         pill.title = `Pairing #${number}`;
+
+        // Label only on first/single day
+        pill.textContent = isFirst ? `#${number}` : '';
+
+        // Left accent border only on first/single
+        pill.style.borderLeft = isFirst ? `3px solid ${color.border}` : 'none';
+
+        // Bleed to right cell edge if not the last day of this trip
+        if (!isLast) {
+          pill.style.marginRight  = '-8px';
+          pill.style.paddingRight = '0';
+        }
+        // Bleed to left cell edge if not the first day
+        if (!isFirst) {
+          pill.style.marginLeft  = '-8px';
+          pill.style.paddingLeft = '4px';
+        }
+
+        // Border radius: round the ends, square the connection sides
+        const rL = isFirst ? '3px' : '0';
+        const rR = isLast  ? '3px' : '0';
+        pill.style.borderRadius = `${rL} ${rR} ${rR} ${rL}`;
+
         pill.onclick = (e) => {
           e.stopPropagation();
           const p = appState.pairings.find(x => x.number === number);
@@ -9740,12 +9770,6 @@ function renderCalendar() {
         };
         cell.appendChild(pill);
       });
-      if (entries.length > MAX_VISIBLE) {
-        const more = document.createElement('div');
-        more.className = 'cal-fav-more';
-        more.textContent = `+${entries.length - MAX_VISIBLE} more`;
-        cell.appendChild(more);
-      }
     }
 
     grid.appendChild(cell);
