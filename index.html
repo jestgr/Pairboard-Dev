@@ -1172,7 +1172,27 @@
     cursor: pointer;
   }
 
-  /* ── Settings ─────────────────────────────────────────────── */
+  .cal-fav-pill {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 5px;
+    border-radius: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+    cursor: pointer;
+    line-height: 1.4;
+    display: block;
+  }
+  .cal-fav-more {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    cursor: default;
+  }
   .settings-section {
     background: var(--bg-panel);
     border: 1px solid var(--border);
@@ -1502,6 +1522,12 @@
             <div class="trips-main" style="padding:8px 12px 12px;overflow:hidden;display:flex;flex-direction:column;gap:10px;">
               <div class="trips-toolbar">
                 <span class="trips-count" id="trips-count">— pairings</span>
+                <button id="fav-filter-btn" onclick="toggleFavFilter()"
+                  style="font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:20px;
+                  cursor:pointer;border:1px solid var(--border);background:transparent;
+                  color:var(--text-muted);" title="Show only favorited pairings">
+                  ☆ Favorites
+                </button>
                 <select class="sort-select" id="sort-select" onchange="applyFilters()">
                   <option value="number">Sort: Pairing #</option>
                   <option value="credit-desc">Sort: Most Credit</option>
@@ -1528,6 +1554,12 @@
             <div class="cal-title" id="cal-title">— —</div>
             <button class="cal-nav-btn" onclick="calNav(1)">&#8250;</button>
             <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+              <button id="cal-fav-btn" onclick="calToggleFav()"
+                style="font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:20px;
+                cursor:pointer;border:1px solid var(--border);background:transparent;
+                color:var(--text-muted);" title="Show favorites on calendar">
+                ☆ Favs
+              </button>
               <button id="cal-pool-btn" onclick="calTogglePool()"
                 style="font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:20px;
                 cursor:pointer;border:1px solid var(--border);background:transparent;
@@ -3022,6 +3054,7 @@ let appState = {
   extraXDay: false,       // whether category gets +1 X-day for 20% reserve coverage
   categoryMatchError: null, // set when chart is found but row doesn't match
   categoryAvailableRows: [], // all rows parsed from chart, for override UI
+  favorites: new Set(),      // Set of pairing numbers marked as favorites
 };
 
 let wizardStep = 1;
@@ -4534,6 +4567,15 @@ async function loadStateFromDB() {
         appState.occurrenceFilters = parsed;
         renderOccFilterList();
       }
+    }
+  } catch(_) {}
+
+  // Load favorites
+  try {
+    const favMeta = await dbGet(STORE_META, 'favorites');
+    if (favMeta && favMeta.value) {
+      const arr = JSON.parse(favMeta.value);
+      if (Array.isArray(arr)) appState.favorites = new Set(arr);
     }
   } catch(_) {}
 
@@ -7591,6 +7633,11 @@ function applyOccurrenceFilters(startDays, p) {
 function applyFilters() {
   let result = [...appState.pairings];
 
+  // Favorites filter
+  if (_favFilterActive) {
+    result = result.filter(p => appState.favorites.has(p.number));
+  }
+
   // Text search
   const q = (document.getElementById('search-input').value || '').trim().toLowerCase();
   if (q) {
@@ -7754,6 +7801,39 @@ function applyFilters() {
   }
 }
 
+let _favFilterActive = false;
+
+function toggleFavFilter() {
+  _favFilterActive = !_favFilterActive;
+  const btn = document.getElementById('fav-filter-btn');
+  if (btn) {
+    btn.textContent = _favFilterActive ? '★ Favorites' : '☆ Favorites';
+    btn.style.color = _favFilterActive ? 'var(--amber)' : 'var(--text-muted)';
+    btn.style.borderColor = _favFilterActive ? 'var(--amber)' : 'var(--border)';
+    btn.style.background = _favFilterActive ? 'rgba(251,191,36,0.08)' : 'transparent';
+  }
+  applyFilters();
+}
+
+function toggleFavorite(num, e) {
+  e.stopPropagation();
+  if (appState.favorites.has(num)) {
+    appState.favorites.delete(num);
+  } else {
+    appState.favorites.add(num);
+  }
+  // Persist
+  dbPut(STORE_META, { key: 'favorites', value: JSON.stringify([...appState.favorites]) });
+  // Update just this card's star without re-rendering the whole list
+  const btn = document.querySelector(`.fav-btn[data-num="${num}"]`);
+  if (btn) {
+    const isFav = appState.favorites.has(num);
+    btn.textContent = isFav ? '★' : '☆';
+    btn.style.color = isFav ? 'var(--amber)' : 'var(--text-muted)';
+    btn.title = isFav ? 'Remove from favorites' : 'Mark as favorite';
+  }
+}
+
 function renderTripList() {
   const list = document.getElementById('trip-list');
   const count = appState.filteredPairings.length;
@@ -7891,10 +7971,18 @@ function renderTripList() {
           ${badges.length ? `<span style="margin-left:8px;display:inline-flex;gap:5px;">${badges.join('')}</span>` : ''}
           <span class="occ-badge" style="font-family:var(--mono);font-size:10px;color:var(--text-muted);margin-left:6px;"></span>
         </div>
-        <div style="text-align:right;flex-shrink:0;line-height:1.5;">
-          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green);">${pay}</span>
-          <span style="font-family:var(--mono);font-size:10px;color:var(--green);margin-left:2px;">pay</span>
-          <span style="font-family:var(--mono);font-size:10px;color:var(--text-secondary);margin-left:8px;">${cr} cr</span>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+          <button class="fav-btn" data-num="${p.number}"
+            title="${appState.favorites.has(p.number) ? 'Remove from favorites' : 'Mark as favorite'}"
+            style="background:none;border:none;cursor:pointer;font-size:16px;padding:2px 4px;line-height:1;
+                   color:${appState.favorites.has(p.number) ? 'var(--amber)' : 'var(--text-muted)'};">
+            ${appState.favorites.has(p.number) ? '★' : '☆'}
+          </button>
+          <div style="text-align:right;line-height:1.5;">
+            <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green);">${pay}</span>
+            <span style="font-family:var(--mono);font-size:10px;color:var(--green);margin-left:2px;">pay</span>
+            <span style="font-family:var(--mono);font-size:10px;color:var(--text-secondary);margin-left:8px;">${cr} cr</span>
+          </div>
         </div>
       </div>
       <div style="margin-top:5px;display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;">
@@ -7916,6 +8004,9 @@ function renderTripList() {
       }
     }
     card.onclick = () => showPairingDetail(p, appState.survivingMap.get(p.number));
+    // Star button — must attach after innerHTML is set
+    const favBtn = card.querySelector('.fav-btn');
+    if (favBtn) favBtn.onclick = (e) => toggleFavorite(p.number, e);
     list.appendChild(card);
   }
 }
@@ -9285,6 +9376,73 @@ function rawPageNav(dir) {
 // ─────────────────────────────────────────────────────────────
 // ── Calendar state ───────────────────────────────────────────
 let _calPoolMode = 'all'; // 'all' | 'filtered'
+let _calFavMode  = false; // show favorite bars on calendar
+
+// Golden-angle color palette for favorites — each pairing gets a distinct hue
+function favPairingColor(index) {
+  const hue = (index * 137.508) % 360;
+  return {
+    bg:     `hsla(${hue},70%,55%,0.18)`,
+    border: `hsla(${hue},70%,55%,0.5)`,
+    text:   `hsl(${hue},60%,70%)`,
+  };
+}
+
+// Build a Map<'YYYY-MM-DD' → [{number, color}]> for all favorited pairings.
+// Mirrors the anchor + offset logic in renderCalendar exactly.
+function buildFavDateMap() {
+  const map = new Map(); // dateKey → [{number, color}]
+
+  // Get ordered list of favorited pairings so colors are stable
+  const favPairings = appState.pairings
+    .filter(p => appState.favorites.has(p.number));
+
+  if (favPairings.length === 0) return map;
+
+  // Anchor — same logic as renderCalendar
+  const bpStartLocal = parseBPDate(appState.bidPeriodStart);
+  const anchor  = bpStartLocal || new Date(appState.calYear, appState.calMonth, 1);
+  const anchorY = anchor.getFullYear();
+  const anchorM = anchor.getMonth();
+  const survivingMap = appState.survivingMap || new Map();
+
+  favPairings.forEach((p, idx) => {
+    const color = favPairingColor(idx);
+    const tripLen = Math.max(1, p.days || 1);
+
+    // Use surviving occurrences if available, otherwise all
+    const allOcc = computeOccurrences(p);
+    const startDays = survivingMap.has(p.number)
+      ? [...survivingMap.get(p.number)]
+      : allOcc;
+
+    startDays.forEach(startDay => {
+      for (let offset = 0; offset < tripLen; offset++) {
+        const d   = new Date(anchorY, anchorM, startDay + offset);
+        const key = localDKey(d.getFullYear(), d.getMonth(), d.getDate());
+        if (!map.has(key)) map.set(key, []);
+        // Avoid duplicate entries for the same pairing on the same day
+        if (!map.get(key).some(e => e.number === p.number)) {
+          map.get(key).push({ number: p.number, color });
+        }
+      }
+    });
+  });
+
+  return map;
+}
+
+function calToggleFav() {
+  _calFavMode = !_calFavMode;
+  const btn = document.getElementById('cal-fav-btn');
+  if (btn) {
+    btn.textContent   = _calFavMode ? '★ Favs' : '☆ Favs';
+    btn.style.color      = _calFavMode ? 'var(--amber)' : 'var(--text-muted)';
+    btn.style.borderColor = _calFavMode ? 'var(--amber-dim)' : 'var(--border)';
+    btn.style.background  = _calFavMode ? 'var(--amber-glow)' : 'transparent';
+  }
+  renderCalendar();
+}
 
 function calTogglePool() {
   _calPoolMode = _calPoolMode === 'all' ? 'filtered' : 'all';
@@ -9436,6 +9594,9 @@ function renderCalendar() {
   document.getElementById('cal-title').textContent =
     new Date(y, m, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
+  // ── Build favorite bars map (only when mode is active) ───
+  const favDateMap = _calFavMode ? buildFavDateMap() : null;
+
   // ── Build pairing count map using timezone-safe keys ─────
   const pool = _calPoolMode === 'filtered'
     ? appState.filteredPairings
@@ -9558,6 +9719,33 @@ function renderCalendar() {
       hdiv.className = 'cal-holiday';
       hdiv.textContent = holiday;
       cell.appendChild(hdiv);
+    }
+
+    // Favorite trip pills
+    if (favDateMap && (isThisMonth || inBidPeriod)) {
+      const entries = favDateMap.get(dateKey) || [];
+      const MAX_VISIBLE = 2;
+      entries.slice(0, MAX_VISIBLE).forEach(({ number, color }) => {
+        const pill = document.createElement('div');
+        pill.className = 'cal-fav-pill';
+        pill.textContent = `#${number}`;
+        pill.style.background   = color.bg;
+        pill.style.borderLeft   = `3px solid ${color.border}`;
+        pill.style.color        = color.text;
+        pill.title = `Pairing #${number}`;
+        pill.onclick = (e) => {
+          e.stopPropagation();
+          const p = appState.pairings.find(x => x.number === number);
+          if (p) showPairingDetail(p, appState.survivingMap.get(p.number));
+        };
+        cell.appendChild(pill);
+      });
+      if (entries.length > MAX_VISIBLE) {
+        const more = document.createElement('div');
+        more.className = 'cal-fav-more';
+        more.textContent = `+${entries.length - MAX_VISIBLE} more`;
+        cell.appendChild(more);
+      }
     }
 
     grid.appendChild(cell);
