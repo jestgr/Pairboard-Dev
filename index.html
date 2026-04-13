@@ -1716,6 +1716,29 @@
                   <div id="far117-report-local" style="font-family:var(--mono);font-size:10px;color:var(--text-muted);margin-top:3px;"></div>
                 </div>
                 <div>
+                  <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:5px;">Base Timezone</div>
+                  <select id="far117-base-tz" oninput="calcFAR117()" style="background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:6px 10px;color:var(--text-primary);font-family:var(--mono);font-size:12px;width:100%;">
+                    <option value="auto"                  style="background:var(--bg-panel);color:var(--text-primary);">Auto (browser)</option>
+                    <option value="America/New_York"      style="background:var(--bg-panel);color:var(--text-primary);">Eastern (ET)</option>
+                    <option value="America/Chicago"       style="background:var(--bg-panel);color:var(--text-primary);">Central (CT)</option>
+                    <option value="America/Denver"        style="background:var(--bg-panel);color:var(--text-primary);">Mountain (MT)</option>
+                    <option value="America/Los_Angeles"   style="background:var(--bg-panel);color:var(--text-primary);">Pacific (PT)</option>
+                    <option value="America/Anchorage"     style="background:var(--bg-panel);color:var(--text-primary);">Alaska (AKT)</option>
+                    <option value="Pacific/Honolulu"      style="background:var(--bg-panel);color:var(--text-primary);">Hawaii (HT)</option>
+                    <option value="America/Halifax"       style="background:var(--bg-panel);color:var(--text-primary);">Atlantic (AT)</option>
+                    <option value="America/Sao_Paulo"     style="background:var(--bg-panel);color:var(--text-primary);">Brazil (BRT)</option>
+                    <option value="Europe/London"         style="background:var(--bg-panel);color:var(--text-primary);">London (GMT/BST)</option>
+                    <option value="Europe/Paris"          style="background:var(--bg-panel);color:var(--text-primary);">Central Europe (CET)</option>
+                    <option value="Africa/Johannesburg"   style="background:var(--bg-panel);color:var(--text-primary);">South Africa (SAST)</option>
+                    <option value="Asia/Dubai"            style="background:var(--bg-panel);color:var(--text-primary);">Dubai (GST)</option>
+                    <option value="Asia/Kolkata"          style="background:var(--bg-panel);color:var(--text-primary);">India (IST)</option>
+                    <option value="Asia/Tokyo"            style="background:var(--bg-panel);color:var(--text-primary);">Japan (JST)</option>
+                    <option value="Asia/Seoul"            style="background:var(--bg-panel);color:var(--text-primary);">Korea (KST)</option>
+                    <option value="Asia/Shanghai"         style="background:var(--bg-panel);color:var(--text-primary);">China (CST)</option>
+                    <option value="Australia/Sydney"      style="background:var(--bg-panel);color:var(--text-primary);">Sydney (AEST)</option>
+                  </select>
+                </div>
+                <div>
                   <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:5px;">Number of Flight Segments</div>
                   <select id="far117-segments" oninput="calcFAR117()" style="background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:6px 10px;color:var(--text-primary);font-family:var(--mono);font-size:12px;width:100%;">
                     <option value="1" style="background:var(--bg-panel);color:var(--text-primary);">1</option>
@@ -1723,7 +1746,8 @@
                     <option value="3" style="background:var(--bg-panel);color:var(--text-primary);">3</option>
                     <option value="4" style="background:var(--bg-panel);color:var(--text-primary);">4</option>
                     <option value="5" style="background:var(--bg-panel);color:var(--text-primary);">5</option>
-                    <option value="6" style="background:var(--bg-panel);color:var(--text-primary);">6+</option>
+                    <option value="6" style="background:var(--bg-panel);color:var(--text-primary);">6</option>
+                    <option value="7" style="background:var(--bg-panel);color:var(--text-primary);">7+</option>
                   </select>
                 </div>
                 <div>
@@ -1775,12 +1799,12 @@
               </div>
               <div id="far117-latt-panel" style="display:none;">
               <div style="padding:10px 16px 4px;font-family:var(--mono);font-size:11px;color:var(--text-muted);line-height:1.6;">
-                Block = pushback → gate (taxi out + airborne + taxi in).<br>
-                LATT = LLBI − (Block − Taxi Out) &nbsp;·&nbsp; Latest Pushback = LATT − Taxi Out
+                Block = airborne time (wheels up → wheels down). Taxi phases are entered separately.<br>
+                LATT = LLBI − Block(air) − Taxi In &nbsp;·&nbsp; Latest Pushback = LATT − Taxi Out
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding:10px 16px 14px;">
                 <div>
-                  <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:5px;">Block (H:MM)</div>
+                  <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:5px;">Block — air time (H:MM)</div>
                   <input type="text" id="far117-latt-block" placeholder="e.g. 2:45, 2.45, 0245" oninput="calcLATT()"
                     style="background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:6px 10px;color:var(--text-primary);font-family:var(--mono);font-size:13px;width:100%;box-sizing:border-box;">
                 </div>
@@ -6678,22 +6702,19 @@ function far117MaxFlightTimeUn(reportMins) {
   return (reportMins >= 5*60 && reportMins < 20*60) ? 9 * 60 : 8 * 60;
 }
 
-// Table B — Max FDP, unaugmented 2-pilot (§117.13)
-// [from, to, [1seg,2seg,3seg,4seg,5seg,6+seg]] in minutes
+// Table B — Max FDP, unaugmented 2-pilot (§117.13) — Delta lineholder chart
+// [from, to, [1seg, 2seg, 3seg, 4seg, 5seg, 6seg, 7+seg]] in minutes
 const FAR117_TABLE_B = [
-  [  0*60,  4*60+59, [9*60, 9*60, 9*60, 9*60, 9*60, 9*60]],
-  [  5*60,  5*60+59, [13*60, 13*60, 12*60, 12*60, 11*60+30, 11*60+30]],
-  [  6*60,  6*60+59, [13*60+30, 13*60, 12*60+30, 12*60, 11*60+30, 11*60]],
-  [  7*60, 11*60+59, [14*60, 13*60+30, 13*60, 12*60+30, 12*60, 11*60+30]],
-  [ 12*60, 12*60+59, [13*60+30, 13*60, 12*60+30, 12*60, 11*60+30, 11*60]],
-  [ 13*60, 13*60+59, [13*60, 12*60+30, 12*60, 11*60+30, 11*60, 10*60+30]],
-  [ 14*60, 14*60+59, [12*60+30, 12*60, 11*60+30, 11*60, 10*60+30, 10*60]],
-  [ 15*60, 15*60+59, [12*60, 11*60+30, 11*60, 10*60+30, 10*60, 9*60+30]],
-  [ 16*60, 16*60+59, [11*60+30, 11*60, 10*60+30, 10*60, 9*60+30, 9*60]],
-  [ 17*60, 17*60+59, [11*60, 10*60+30, 10*60, 9*60+30, 9*60+30, 9*60]],
-  [ 18*60, 21*60+59, [10*60, 10*60, 9*60+30, 9*60+30, 9*60, 9*60]],
-  [ 22*60, 22*60+59, [9*60+30, 9*60+30, 9*60, 9*60, 9*60, 9*60]],
-  [ 23*60, 23*60+59, [9*60, 9*60, 9*60, 9*60, 9*60, 9*60]],
+  [  0*60,  3*60+59, [9*60,  9*60,  9*60,  9*60,  9*60,       9*60,  9*60      ]], // 0000–0359
+  [  4*60,  4*60+59, [10*60, 10*60, 10*60, 10*60, 9*60,        9*60,  9*60      ]], // 0400–0459
+  [  5*60,  5*60+59, [12*60, 12*60, 12*60, 12*60, 11*60+30,   11*60, 10*60+30  ]], // 0500–0559
+  [  6*60,  6*60+59, [13*60, 13*60, 12*60, 12*60, 11*60+30,   11*60, 10*60+30  ]], // 0600–0659
+  [  7*60, 11*60+59, [14*60, 14*60, 13*60, 13*60, 12*60+30,   12*60, 11*60+30  ]], // 0700–1159
+  [ 12*60, 12*60+59, [13*60, 13*60, 13*60, 12*60, 12*60+30,   12*60, 11*60+30  ]], // 1200–1259
+  [ 13*60, 16*60+59, [12*60, 12*60, 11*60, 11*60, 10*60,       9*60,  9*60      ]], // 1300–1659
+  [ 17*60, 21*60+59, [12*60, 12*60, 11*60, 10*60,  9*60,       9*60,  9*60      ]], // 1700–2159
+  [ 22*60, 22*60+59, [11*60, 11*60, 10*60,  9*60,  9*60,       9*60,  9*60      ]], // 2200–2259
+  [ 23*60, 23*60+59, [10*60, 10*60, 10*60,  9*60,  9*60,       9*60,  9*60      ]], // 2300–2359
 ];
 
 // Table C — Max FDP, augmented ops (§117.17)
@@ -6717,7 +6738,7 @@ const FAR117_TABLE_C = [
 
 function far117MaxFDP(reportMins, segments, crewType, restClass) {
   if (crewType === 'un2') {
-    const segIdx = Math.min(segments, 6) - 1;
+    const segIdx = Math.min(segments, 7) - 1;  // 1–7+, capped at index 6
     for (const [from, to, limits] of FAR117_TABLE_B) {
       if (reportMins >= from && reportMins <= to) return limits[segIdx];
     }
@@ -6805,6 +6826,20 @@ function getLocalOffsetMins() {
   // Returns current UTC offset in minutes, e.g. -300 for EST, +60 for BST
   return -new Date().getTimezoneOffset();
 }
+// Returns offset for the FAR 117 base timezone selector (falls back to browser)
+function getFar117BaseOffset() {
+  const sel = document.getElementById('far117-base-tz');
+  const tz  = sel ? sel.value : 'auto';
+  if (!tz || tz === 'auto') return getLocalOffsetMins();
+  try {
+    const now   = new Date();
+    const utc   = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+    const local = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+    return (local - utc) / 60000;
+  } catch(e) {
+    return getLocalOffsetMins();
+  }
+}
 function offsetLabel() {
   const off = getLocalOffsetMins();
   const h = Math.floor(Math.abs(off) / 60);
@@ -6814,14 +6849,21 @@ function offsetLabel() {
     ? `GMT${sign}${h}:${String(m).padStart(2,'0')}`
     : `GMT${sign === '+' ? (h === 0 ? '' : sign) : sign}${h}`.replace('GMT+0','GMT').replace('GMT-0','GMT');
 }
-function zuluMinsToLocal(zuluMins) {
-  // Convert Zulu minutes to local HH:MM string
-  const localMins = ((zuluMins + getLocalOffsetMins()) % 1440 + 1440) % 1440;
+function zuluMinsToLocal(zuluMins, offsetMins) {
+  const off = (offsetMins !== undefined && offsetMins !== null) ? offsetMins : getLocalOffsetMins();
+  const localMins = ((zuluMins + off) % 1440 + 1440) % 1440;
   return `${String(Math.floor(localMins/60)).padStart(2,'0')}:${String(localMins%60).padStart(2,'0')}`;
 }
-function localSubtext(zuluMins) {
+function localSubtext(zuluMins, offsetMins) {
   // Returns a small annotation like "14:33L (GMT-5)"
-  return `${zuluMinsToLocal(zuluMins)}L (${offsetLabel()})`;
+  const off = (offsetMins !== undefined && offsetMins !== null) ? offsetMins : getLocalOffsetMins();
+  const abs  = Math.abs(off);
+  const sign = off >= 0 ? '+' : '-';
+  const h    = Math.floor(abs / 60), m = abs % 60;
+  const lbl  = m > 0
+    ? `GMT${sign}${h}:${String(m).padStart(2,'0')}`
+    : `GMT${sign === '+' ? (h === 0 ? '' : sign) : sign}${h}`.replace('GMT+0','GMT').replace('GMT-0','GMT');
+  return `${zuluMinsToLocal(zuluMins, off)}L (${lbl})`;
 }
 
 // Module-level so calcLATT can read it
@@ -6860,7 +6902,8 @@ function calcFAR117() {
 
   const [rh, rm] = reportVal.split(':').map(Number);
   const reportMins = rh * 60 + rm;
-  const reportMinsLocal = ((reportMins + getLocalOffsetMins()) % 1440 + 1440) % 1440;
+  const baseOffset = getFar117BaseOffset();
+  const reportMinsLocal = ((reportMins + baseOffset) % 1440 + 1440) % 1440;
 
   let fdpStartMins = reportMins;
   if (fdpStartVal) {
@@ -6871,6 +6914,7 @@ function calcFAR117() {
   const isAug = crewType !== 'un2';
 
   // ── Calc 1: Normal FDP limit (from FDP start, Table B/C) ──
+  // Table B/C lookup uses local time (Zulu converted via browser offset = departure station local)
   let maxFDP = far117MaxFDP(reportMinsLocal, segs, crewType, restClass);
   let maxFT  = isAug ? far117MaxFlightTime(crewType) : far117MaxFlightTimeUn(reportMinsLocal);
   if (!acclimated) { maxFDP -= 30; maxFT -= 30; }
@@ -6885,7 +6929,7 @@ function calcFAR117() {
   if (rapOn && rapStartVal) {
     const [rph, rpm] = rapStartVal.split(':').map(Number);
     rapMins = rph * 60 + rpm; // Zulu
-    const rapMinsLocal = ((rapMins + getLocalOffsetMins()) % 1440 + 1440) % 1440;
+    const rapMinsLocal = ((rapMins + baseOffset) % 1440 + 1440) % 1440;
 
     // Table B/C lookup from RAP start local time
     let rapTableFDP = far117MaxFDP(rapMinsLocal, segs, crewType, restClass);
@@ -6907,7 +6951,7 @@ function calcFAR117() {
 
     // Update RAP start local subtext
     const rapLocalEl = document.getElementById('far117-rapstart-local');
-    if (rapLocalEl) rapLocalEl.textContent = localSubtext(rapMins);
+    if (rapLocalEl) rapLocalEl.textContent = localSubtext(rapMins, baseOffset);
 
     // Build RAP section for results
     const binding = isMoreRestrictive
@@ -6919,27 +6963,27 @@ function calcFAR117() {
         <div style="font-size:10px;color:var(--blue);text-transform:uppercase;
           letter-spacing:.08em;margin-bottom:4px;padding-bottom:6px;
           border-bottom:1px solid rgba(91,155,213,0.2);">RAP+FDP Limit (§117.21) ${binding}</div>
-        ${rowInner('RAP Start (Z)', far117FormatTime(rapMins), null, localSubtext(rapMins), null)}
+        ${rowInner('RAP Start (Z)', far117FormatTime(rapMins), null, localSubtext(rapMins, baseOffset), null)}
         ${rowInner('Table FDP from RAP start', far117FormatTime(rapTableFDP), null, null,
             `${segs} seg${segs>1?'s':''}`)}
         ${rowInner('RAP+4 cap (max 16:00)', far117FormatTime(rapPlusFour), 'var(--blue)', null,
             rapPlusFour === 16*60 ? 'capped at 16:00 · non-extendable' : 'non-extendable')}
         ${rowInner('LLBI from RAP (Z)', far117ClockTime(rapMins, rapPlusFour), 'var(--blue)',
-            localSubtext(llbi2), null)}
+            localSubtext(llbi2, baseOffset), null)}
       </div>`;
   }
 
   _far117LLRmins = bindingLLBI;
 
-  // WOCL checks
+  // WOCL checks (based on local report time converted from Zulu)
   const inWOCL      = reportMinsLocal >= 2*60 && reportMinsLocal < 6*60;
   const woclOverlap = !isAug && far117IsWOCL(fdpStartMins, maxFDP);
   const woclNote = woclOverlap && !inWOCL
     ? `<div style="color:var(--amber);margin-top:8px;padding:7px 10px;background:rgba(255,176,32,0.08);border:1px solid rgba(255,176,32,0.2);border-radius:5px;">
-        ⚠ FDP overlaps WOCL (0200–0559 Z). Table B uses scheduled report time.</div>` : '';
+        ⚠ FDP overlaps WOCL (0200–0559 local). Table B uses scheduled report time.</div>` : '';
   const woclReportNote = !isAug && inWOCL
     ? `<div style="color:#e05555;margin-top:6px;padding:7px 10px;background:rgba(224,85,85,0.08);border:1px solid rgba(224,85,85,0.2);border-radius:5px;">
-        ✦ Report within WOCL (0200–0559 Z) — Max FDP capped at 9:00 regardless of segments.</div>` : '';
+        ✦ Report within WOCL (0200–0559 local) — Max FDP capped at 9:00 regardless of segments.</div>` : '';
 
   const tableLabel = isAug ? 'Table C' : 'Table B';
   const crewLabel  = crewType === 'aug3' ? '3-pilot' : crewType === 'aug4' ? '4-pilot' : '2-pilot';
@@ -6975,8 +7019,8 @@ function calcFAR117() {
   // Update local subtexts under inputs
   const rptLocalEl = document.getElementById('far117-report-local');
   const fdpLocalEl = document.getElementById('far117-fdpstart-local');
-  if (rptLocalEl) rptLocalEl.textContent = localSubtext(reportMins);
-  if (fdpLocalEl) fdpLocalEl.textContent = fdpStartVal ? localSubtext(fdpStartMins) : '';
+  if (rptLocalEl) rptLocalEl.textContent = localSubtext(reportMins, baseOffset);
+  if (fdpLocalEl) fdpLocalEl.textContent = fdpStartVal ? localSubtext(fdpStartMins, baseOffset) : '';
 
   const bindingNote = rapOn && rapStartVal
     ? `<div style="margin-top:8px;padding:7px 10px;border-radius:5px;font-family:var(--mono);font-size:11px;
@@ -6987,17 +7031,17 @@ function calcFAR117() {
       </div>` : '';
 
   body.innerHTML =
-    row('Report Time (Z)', far117FormatTime(reportMins), null, localSubtext(reportMins), null) +
+    row('Report Time (Z)', far117FormatTime(reportMins), null, localSubtext(reportMins, baseOffset), null) +
     row('FDP Start (Z)', far117FormatTime(fdpStartMins), null,
-        localSubtext(fdpStartMins), fdpStartVal ? null : '= report') +
+        localSubtext(fdpStartMins, baseOffset), fdpStartVal ? null : '= report') +
     row(`Max FDP (${tableLabel})`, far117FormatTime(maxFDP), 'var(--amber)', null, segNote) +
     row('Max Flight Time (Table A)', far117FormatTime(maxFT), 'var(--amber)', null, 'non-extendable') +
     row('LLBI — Normal (Z)', far117ClockTime(fdpStartMins, maxFDP), 'var(--green)',
-        localSubtext(llbi1), null) +
+        localSubtext(llbi1, baseOffset), null) +
     rapLimitHtml +
     (rapOn && rapStartVal
       ? row('▶ Binding LLBI (Z)', far117ClockTime(0, bindingLLBI), bindingLabel==='RAP+FDP cap' ? '#e05555' : 'var(--green)',
-            localSubtext(bindingLLBI), null)
+            localSubtext(bindingLLBI, baseOffset), null)
       : '') +
     bindingNote +
     woclNote + woclReportNote;
@@ -7089,11 +7133,11 @@ function calcLATT() {
     return;
   }
 
-  // Block = pushback → gate (taxi out + airborne + taxi in)
+  // Block = airborne time (wheels up to wheels down) — taxi phases are separate inputs
   // LLBI = Latest Legal Block In = FDP start + Max FDP
-  // LATT (wheels-up) = LLBI − (Block − Taxi Out) = LLBI − Block + Taxi Out
-  // Latest Pushback   = LATT − Taxi Out = LLBI − Block  (cross-check)
-  const lattMins = _far117LLRmins - blockMins + txOut;
+  // LATT (wheels-up) = LLBI − Block(air) − Taxi In
+  // Latest Pushback   = LATT − Taxi Out = LLBI − Block − Taxi In − Taxi Out
+  const lattMins = _far117LLRmins - blockMins - txIn;
   const pushMins = txOut > 0 ? lattMins - txOut : null;
 
   function fmt(m) {
@@ -7136,20 +7180,21 @@ function calcLATT() {
 
   // Local time annotations for LATT results
   const llrWrapped  = (((_far117LLRmins % 1440) + 1440) % 1440);
+  const lattBase = getFar117BaseOffset();
 
   result.innerHTML =
     row('Latest Legal Block In (LLBI Z)', fmt(_far117LLRmins), 'var(--green)',
-        localSubtext(llrWrapped), null) +
+        localSubtext(llrWrapped, lattBase), null) +
     row('Latest Acceptable Takeoff Time (LATT Z)', fmt(lattMins), 'var(--amber)',
-        localSubtext(lattWrapped),
-        `LLBI − (${fmtElapsed(blockMins)} blk − ${fmtElapsed(txOut)} txo)`) +
+        localSubtext(lattWrapped, lattBase),
+        `LLBI − ${fmtElapsed(blockMins)} blk${txIn > 0 ? ` − ${fmtElapsed(txIn)} txi` : ''}`) +
     (pushMins !== null ? row('Latest Pushback (Z)', fmt(pushMins), 'var(--blue)',
-        localSubtext(pushWrapped),
+        localSubtext(pushWrapped, lattBase),
         `LATT − ${fmtElapsed(txOut)} taxi out`) : '') +
     `<div style="margin-top:10px;padding:9px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;display:flex;gap:20px;flex-wrap:wrap;">
       <span style="font-family:var(--mono);font-size:11px;color:var(--text-muted);">
         Now (Z): <span style="color:var(--text-secondary);font-weight:600;">${String(nowZ.getUTCHours()).padStart(2,'0')}:${String(nowZ.getUTCMinutes()).padStart(2,'0')}Z</span>
-        <span style="color:var(--text-muted);"> · ${zuluMinsToLocal(nowZ.getUTCHours()*60+nowZ.getUTCMinutes())}L (${offsetLabel()})</span>
+        <span style="color:var(--text-muted);"> · ${zuluMinsToLocal(nowZ.getUTCHours()*60+nowZ.getUTCMinutes(), lattBase)}L (${offsetLabel()})</span>
       </span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--text-muted);">
         Time to LATT: ${countdown(lattWrapped)}
