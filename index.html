@@ -815,6 +815,7 @@
   }
   [data-tip]:hover::after,
   [data-tip]:focus::after { opacity: 1; }
+  [data-tip]:focus { outline: none; }
   .trip-card.selected { border-color: var(--amber-dim); background: var(--amber-glow2); }
   .trip-number {
     font-family: var(--mono);
@@ -4543,6 +4544,8 @@ async function init() {
     console.error('DB init error:', err);
     toast('Database initialisation failed — data may not persist', 'error');
   }
+  // Fire-and-forget: warm CDN cache for offline-required assets
+  preloadOfflineAssets().catch(() => {});
 }
 
 async function loadStateFromDB() {
@@ -7952,7 +7955,7 @@ function renderTripList() {
     function legCountSpan(tripDay, legCount) {
       const tip = dayAlertTip(tripDay);
       const alertColor = tip ? 'color:var(--amber);' : 'color:var(--text-muted);';
-      const dataTip = tip ? ` data-tip="${tip}"` : '';
+      const dataTip = tip ? ` data-tip="${tip}" tabindex="0" onclick="event.stopPropagation()"` : '';
       return `<span style="${alertColor}cursor:${tip ? 'default' : 'default'};"${dataTip}>${legCount}</span>`;
     }
 
@@ -7970,7 +7973,7 @@ function renderTripList() {
         if (nextDay.legs.length > 0 && nextDay.legs[0].depTime)
           startT = dayStartTime(nextDay.legs[0].depTime);
       }
-      const warn = day.arrLayoverMismatch ? ` <span style="color:#f0c040;font-size:12px;cursor:default;" title="Layover city does not match last arrival" data-tip="Hotel city ≠ last arrival">⌂</span>` : '';
+      const warn = day.arrLayoverMismatch ? ` <span style="color:#f0c040;font-size:12px;cursor:default;" title="Layover city does not match last arrival" data-tip="Hotel city ≠ last arrival" tabindex="0" onclick="event.stopPropagation()">⌂</span>` : '';
       layoverParts.push(`${day.layoverCity}${warn} ${startT}${sep}${legCountSpan(nextDay, nextLegs)}`);
     }
     // CO time: last arrival of last day + 30 min — appended to layover line
@@ -7998,13 +8001,13 @@ function renderTripList() {
 
     // Badges (redeye, DH, pay flags)
     const badges = [];
-    if (p.containsRedeye) badges.push(`<span style="color:#e05555;font-size:13px;cursor:default;" title="Contains redeye leg" data-tip="Redeye leg">◉</span>`);
-    if (p.containsDH)     badges.push(`<span style="color:var(--blue);font-size:10px;cursor:default;" title="Contains deadhead leg" data-tip="Deadhead leg">DH</span>`);
+    if (p.containsRedeye) badges.push(`<span style="color:#e05555;font-size:13px;cursor:default;" data-tip="Redeye leg" tabindex="0" onclick="event.stopPropagation()">◉</span>`);
+    if (p.containsDH)     badges.push(`<span style="color:var(--blue);font-size:10px;cursor:default;" data-tip="Deadhead leg" tabindex="0" onclick="event.stopPropagation()">DH</span>`);
     const payBadgeStyle = 'color:var(--green);font-family:var(--mono);font-size:10px;cursor:default;font-weight:600;';
-    if (p.sitPay   > 0) badges.push(`<span style="${payBadgeStyle}" data-tip="SIT pay: ${decToHHMM(p.sitPay)}">S</span>`);
-    if (p.edpPay   > 0) badges.push(`<span style="${payBadgeStyle}" data-tip="Extended duty pay: ${p.edpPay.toFixed(2)}">E</span>`);
-    if (p.holPay   > 0) badges.push(`<span style="${payBadgeStyle}" data-tip="Holiday pay: ${p.holPay.toFixed(2)}">H</span>`);
-    if (p.carvePay > 0) badges.push(`<span style="${payBadgeStyle}" data-tip="Carve pay: ${p.carvePay.toFixed(2)}">C</span>`);
+    if (p.sitPay   > 0) badges.push(`<span style="${payBadgeStyle}" data-tip="SIT pay: ${decToHHMM(p.sitPay)}" tabindex="0" onclick="event.stopPropagation()">S</span>`);
+    if (p.edpPay   > 0) badges.push(`<span style="${payBadgeStyle}" data-tip="Extended duty pay: ${p.edpPay.toFixed(2)}" tabindex="0" onclick="event.stopPropagation()">E</span>`);
+    if (p.holPay   > 0) badges.push(`<span style="${payBadgeStyle}" data-tip="Holiday pay: ${p.holPay.toFixed(2)}" tabindex="0" onclick="event.stopPropagation()">H</span>`);
+    if (p.carvePay > 0) badges.push(`<span style="${payBadgeStyle}" data-tip="Carve pay: ${p.carvePay.toFixed(2)}" tabindex="0" onclick="event.stopPropagation()">C</span>`);
 
     card.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
@@ -10198,6 +10201,68 @@ function rotLoadTesseract() {
   });
 }
 
+// ── Offline asset preloader ──────────────────────────────────────────────────
+// Warms the browser HTTP cache for the two "one-time downloads" the app needs:
+//   1. pdf.worker.min.js  (~1 MB)  — used by the PDF viewer
+//   2. tesseract.min.js + eng.traineddata (~4 MB)  — used by rotation OCR
+// Runs silently on app open; localStorage flags prevent repeat downloads.
+
+const _PRELOAD_WORKER_KEY = 'pb_prefetch_worker_v1';  // bump suffix if URL changes
+const _PRELOAD_TESS_KEY   = 'pb_prefetch_tess_v1';
+const _PDF_WORKER_URL     = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+async function preloadOfflineAssets() {
+  if (!navigator.onLine) return;   // offline already — nothing to fetch
+
+  const workerDone = localStorage.getItem(_PRELOAD_WORKER_KEY) === '1';
+  const tessDone   = localStorage.getItem(_PRELOAD_TESS_KEY)   === '1';
+  if (workerDone && tessDone) return;  // both already cached, nothing to do
+
+  // ── subtle non-blocking status pill ──────────────────────────────────────
+  const pill = document.createElement('div');
+  pill.style.cssText = [
+    'position:fixed', 'bottom:68px', 'left:50%', 'transform:translateX(-50%)',
+    'background:var(--bg-card)', 'border:1px solid var(--border-bright)',
+    'color:var(--text-secondary)', 'font-family:var(--mono)', 'font-size:11px',
+    'padding:5px 16px', 'border-radius:20px', 'z-index:9999',
+    'box-shadow:0 2px 10px rgba(0,0,0,0.35)', 'pointer-events:none',
+    'white-space:nowrap', 'opacity:0', 'transition:opacity 0.3s ease'
+  ].join(';');
+  pill.textContent = '⬇ Preparing offline assets…';
+  document.body.appendChild(pill);
+  requestAnimationFrame(() => requestAnimationFrame(() => pill.style.opacity = '1'));
+
+  const dismissPill = (success) => {
+    pill.textContent = success ? '✓ Ready for offline use' : '⚠ Offline prep failed — connect for first use';
+    pill.style.color  = success ? 'var(--green)' : 'var(--amber)';
+    setTimeout(() => {
+      pill.style.opacity = '0';
+      setTimeout(() => pill.remove(), 400);
+    }, success ? 2500 : 4000);
+  };
+
+  // ── run both fetches in parallel, independently ───────────────────────────
+  let anyFailed = false;
+
+  const fetchWorker = workerDone ? Promise.resolve() :
+    fetch(_PDF_WORKER_URL, { mode: 'cors' })
+      .then(r => { if (r.ok) localStorage.setItem(_PRELOAD_WORKER_KEY, '1'); else throw new Error('bad status'); })
+      .catch(() => { anyFailed = true; });
+
+  const fetchTess = tessDone ? Promise.resolve() :
+    rotLoadTesseract()
+      .then(async () => {
+        // createWorker loads + caches eng.traineddata; terminate immediately after
+        const w = await Tesseract.createWorker('eng', 1, { logger: () => {} });
+        await w.terminate();
+        localStorage.setItem(_PRELOAD_TESS_KEY, '1');
+      })
+      .catch(() => { anyFailed = true; });
+
+  await Promise.all([fetchWorker, fetchTess]);
+  dismissPill(!anyFailed);
+}
+
 function rotEl(id) { return document.getElementById(id); }
 
 function rotShowError(msg) {
@@ -10361,7 +10426,7 @@ function rotParseText(raw) {
     const rt = line.match(/ACTUAL\s+REPORT\s+TIME\s+(\d{3,4})\s*$/i);
     if (rt) r.reportTime = hhmm(rt[1]);
 
-    const pn = line.match(/[A-Z]\s+\d{7}\s+([A-Z]+,\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/);
+    const pn = line.match(/[A-Z]\s+\d{7}\s+([A-Z]+[,.]\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/);
     if (pn) r.pilotName = pn[1];
   }
 
@@ -10381,7 +10446,7 @@ function rotParseText(raw) {
     if (!trim) continue;
 
     // ── Pilot name ────────────────────────────────────────
-    const pn = trim.match(/[A-Z]\s+\d{7}\s+([A-Z]+,\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/);
+    const pn = trim.match(/[A-Z]\s+\d{7}\s+([A-Z]+[,.]\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/);
     if (pn && !r.pilotName) { r.pilotName = pn[1]; continue; }
 
     // ── Report times for subsequent days ─────────────────
@@ -10395,7 +10460,7 @@ function rotParseText(raw) {
     const lm = trim.match(/^([A-Z][A-Z0-9]{2})\s+([\d]+\.[\d]+)\/(.+)/);
     if (lm && curDay) {
       // Strip trailing pay codes like "4.41BL", "5.22BL" from hotel name
-      const rawHotel = lm[3].trim().replace(/\s+[\d.]+[A-Z]{2,5}\s*$/, '').trim();
+      const rawHotel = lm[3].trim().replace(/(\s+[\d.]+[A-Z]{2,5})+\s*$/, '').trim();
       curDay.layover = { city:lm[1], restHrs:hhmm(lm[2]), hotel:rawHotel };
       continue;
     }
@@ -10481,7 +10546,7 @@ function rotParseText(raw) {
 
     // Parse day number and flight from non-continuation prefix
     let dayNum = null, fltNum = null;
-    const p = prefix.replace(/^\*/,'').trim();
+    const p = prefix.replace(/^\*/, '').replace(/\s*\*\s*$/, '').trim();
 
     if (p) {
       // 2-digit + letters: "10YX5815"
@@ -10779,7 +10844,10 @@ function rotRenderParsed(p) {
       ['Trip Rate (TRP)', t.trp,  'var(--green)'],
       ['ADG',             t.adg,  'var(--text-secondary)'],
       ['EDP',             t.edp,  'var(--text-secondary)'],
-    ].filter(([,v]) => v!==null && v!==undefined && !isNaN(v));
+      ['SIT',             t.sit,  'var(--text-secondary)'],
+      ['Holiday (HOL)',   t.hol,  'var(--text-secondary)'],
+      ['Carve',           t.carve,'var(--text-secondary)'],
+    ].filter(([,v]) => v !== null && v !== undefined && !isNaN(v) && v > 0);
 
     if (items.length) {
       html += `
