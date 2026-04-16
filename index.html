@@ -119,6 +119,51 @@
     border-right: 1px solid var(--border);
   }
 
+  /* ── Mobile overlay mode (≤600px) ────────────────────────────
+     Sidebar slides over content — #main always full viewport width */
+  @media (max-width: 600px) {
+    #sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      height: 100vh;
+      z-index: 200;
+      width: var(--sidebar-w) !important;
+      min-width: var(--sidebar-w) !important;
+      transform: translateX(-100%);
+      transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
+    }
+    #sidebar.open {
+      transform: translateX(0);
+      border-right: 1px solid var(--border);
+    }
+    #sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 199;
+    }
+    #sidebar-backdrop.visible { display: block; }
+    #sidebar-tab {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      height: 54px !important;
+      transform: none !important;
+      z-index: 201;
+      border-radius: 0 !important;
+      border-top: none !important;
+      border-bottom: none !important;
+      border-left: none !important;
+      border-right: 1px solid var(--border) !important;
+      padding: 0 10px !important;
+      width: 44px !important;
+      box-sizing: border-box !important;
+    }
+    #sidebar-tab.sb-open { left: calc(var(--sidebar-w)) !important; border-left: 1px solid var(--border) !important; border-right: none !important; }
+    #topbar { padding-left: 56px !important; }
+  }
+
   /* Pull-tab — sits at left edge of #app, moves with sidebar */
   #sidebar-tab {
     position: absolute;
@@ -510,6 +555,23 @@
     color: var(--text-muted);
     font-family: var(--mono);
   }
+  #topbar-meta-bar { display: none; }
+  @media (max-width: 600px) {
+    #topbar .topbar-meta { display: none; }
+    #topbar-meta-bar {
+      display: block;
+      padding: 3px 16px 3px 56px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg-deep);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 0;
+    }
+  }
   .topbar-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
   .btn {
     display: inline-flex;
@@ -792,7 +854,7 @@
   }
   .trip-card:hover { border-color: var(--border-bright); background: var(--bg-hover); }
 
-  /* CSS tooltip for flag icons — works on hover AND touch (via focus) */
+  /* CSS tooltip — positioning handled by JS (pb-tip) to avoid overflow:hidden clipping in modals */
   [data-tip] { position: relative; }
   [data-tip]::after {
     content: attr(data-tip);
@@ -813,6 +875,7 @@
     transition: opacity 0.15s;
     z-index: 999;
   }
+  /* CSS hover/focus kept for non-modal contexts; JS system takes over inside overflow containers */
   [data-tip]:hover::after,
   [data-tip]:focus::after { opacity: 1; }
   [data-tip]:focus { outline: none; }
@@ -1255,6 +1318,7 @@
     <div class="sb-line"></div>
     <div class="sb-line"></div>
   </div>
+  <div id="sidebar-backdrop" onclick="sidebarClose()"></div>
   <nav id="sidebar">
     <div class="sidebar-logo">
       <div class="logo-mark">PAIRBOARD</div>
@@ -1418,6 +1482,9 @@
       </div>
     </div>
 
+    <!-- Mobile meta sub-bar -->
+    <div id="topbar-meta-bar">No pairing data loaded</div>
+
     <!-- Offline popup toast (dismissible) -->
     <div id="offline-popup" style="display:none;position:fixed;top:64px;left:50%;
       transform:translateX(-50%);z-index:500;
@@ -1535,6 +1602,8 @@
                   <option value="credit-asc">Sort: Least Credit</option>
                   <option value="days-desc">Sort: Most Days</option>
                   <option value="days-asc">Sort: Fewest Days</option>
+                  <option value="pay-desc">Sort: Highest Pay</option>
+                  <option value="pay-asc">Sort: Lowest Pay</option>
                 </select>
               </div>
               <div class="trip-list" id="trip-list"></div>
@@ -1692,7 +1761,61 @@
 
             <!-- FDP Inputs -->
             <div class="settings-section" style="margin-bottom:14px;">
-              <div class="settings-section-title">Flight Duty Period Inputs</div>
+              <div class="settings-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+                <span>Flight Duty Period Inputs</span>
+                <button onclick="document.getElementById('far117-img-input').click()"
+                  style="font-family:var(--mono);font-size:11px;padding:4px 11px;
+                  background:var(--bg-input);border:1px solid var(--border-bright);
+                  border-radius:5px;color:var(--amber);cursor:pointer;white-space:nowrap;">
+                  📷 Import
+                </button>
+                <input type="file" id="far117-img-input" accept="image/*" style="display:none"
+                  onchange="if(this.files[0]){var f=this.files[0];this.value='';far117ImportScreenshot(f);}">
+              </div>
+
+              <!-- OCR progress bar (hidden until OCR is running) -->
+              <div id="far117-ocr-progress" style="display:none;padding:8px 16px 6px;border-bottom:1px solid var(--border);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                  <span id="far117-ocr-status" style="font-family:var(--mono);font-size:11px;color:var(--text-muted);">Initialising…</span>
+                  <span id="far117-ocr-pct" style="font-family:var(--mono);font-size:10px;color:var(--text-muted);">0%</span>
+                </div>
+                <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;">
+                  <div id="far117-ocr-bar" style="height:100%;width:0%;background:var(--amber);border-radius:2px;transition:width 0.15s;"></div>
+                </div>
+              </div>
+
+              <!-- Confirmation card (hidden until OCR complete) -->
+              <div id="far117-ocr-confirm" style="display:none;margin:10px 16px 0;background:var(--bg-input);
+                border:1px solid var(--border-bright);border-radius:8px;overflow:hidden;">
+                <div style="padding:7px 12px;background:rgba(245,176,48,0.08);border-bottom:1px solid var(--border);
+                  font-family:var(--mono);font-size:11px;color:var(--amber);font-weight:600;letter-spacing:.03em;">
+                  📷 Parsed from screenshot
+                </div>
+                <div id="far117-ocr-confirm-body" style="padding:8px 12px;font-family:var(--mono);font-size:12px;"></div>
+                <div style="display:flex;gap:8px;padding:8px 12px;border-top:1px solid var(--border);">
+                  <button onclick="far117OCRApply()"
+                    style="flex:1;padding:8px;background:var(--amber);color:#000;border:none;
+                    border-radius:5px;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;">
+                    Apply to Calculator
+                  </button>
+                  <button onclick="far117OCRDismiss()"
+                    style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--border);
+                    border-radius:5px;color:var(--text-muted);font-family:var(--mono);font-size:12px;cursor:pointer;">
+                    Dismiss
+                  </button>
+                  <button onclick="far117ToggleRawOCR()"
+                    style="padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);
+                    border-radius:5px;color:var(--text-muted);font-family:var(--mono);font-size:11px;cursor:pointer;"
+                    title="Show raw OCR text for debugging">
+                    Raw
+                  </button>
+                </div>
+                <div id="far117-ocr-raw" style="display:none;padding:8px 12px;border-top:1px solid var(--border);
+                  font-family:var(--mono);font-size:10px;color:var(--text-secondary);
+                  white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;
+                  background:var(--bg-void);border-radius:0 0 6px 6px;"></div>
+              </div>
+
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 16px;">
                 <div>
                   <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:5px;">Crew Type</div>
@@ -1715,11 +1838,20 @@
                   <input type="time" id="far117-report-time" value="08:00" oninput="calcFAR117()"
                     style="background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:6px 10px;color:var(--text-primary);font-family:var(--mono);font-size:13px;width:100%;box-sizing:border-box;">
                   <div id="far117-report-local" style="font-family:var(--mono);font-size:10px;color:var(--text-muted);margin-top:3px;"></div>
+                  <div style="margin-top:8px;">
+                    <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:3px;">
+                      Duty Date <span style="color:var(--text-muted);font-size:9px;">(for DST accuracy)</span>
+                    </div>
+                    <input type="date" id="far117-duty-date" oninput="far117SetDutyDate()"
+                      style="background:var(--bg-input);border:1px solid var(--border);border-radius:5px;
+                      padding:5px 8px;color:var(--text-primary);font-family:var(--mono);font-size:12px;
+                      width:100%;box-sizing:border-box;">
+                  </div>
                 </div>
                 <div>
                   <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:5px;">Base Timezone</div>
                   <select id="far117-base-tz" oninput="calcFAR117()" style="background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:6px 10px;color:var(--text-primary);font-family:var(--mono);font-size:12px;width:100%;">
-                    <option value="auto"                  style="background:var(--bg-panel);color:var(--text-primary);">Auto (browser)</option>
+                    <option value="auto"                  style="background:var(--bg-panel);color:var(--text-primary);">Auto</option>
                     <option value="America/New_York"      style="background:var(--bg-panel);color:var(--text-primary);">Eastern (ET)</option>
                     <option value="America/Chicago"       style="background:var(--bg-panel);color:var(--text-primary);">Central (CT)</option>
                     <option value="America/Denver"        style="background:var(--bg-panel);color:var(--text-primary);">Mountain (MT)</option>
@@ -1738,6 +1870,7 @@
                     <option value="Asia/Shanghai"         style="background:var(--bg-panel);color:var(--text-primary);">China (CST)</option>
                     <option value="Australia/Sydney"      style="background:var(--bg-panel);color:var(--text-primary);">Sydney (AEST)</option>
                   </select>
+                  <div id="far117-base-tz-source" style="font-family:var(--mono);font-size:10px;margin-top:3px;"></div>
                 </div>
                 <div>
                   <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:5px;">Number of Flight Segments</div>
@@ -1789,6 +1922,8 @@
             <div class="settings-section" style="margin-bottom:14px;">
               <div class="settings-section-title">Results</div>
               <div id="far117-results-body" style="padding:14px 16px;font-family:var(--mono);font-size:12px;"></div>
+              <!-- OCR-populated timeline — hidden until screenshot import -->
+              <div id="far117-ocr-timeline" style="display:none;padding:0 16px 14px;"></div>
             </div>
 
             <!-- LATT Calculator -->
@@ -1863,6 +1998,33 @@
           </div>
 
           <!-- ── TAB: 30/168 ── -->
+          <!-- Table B Modal — opened when user taps Max FDP result -->
+          <div id="far117-tableb-modal"
+            style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.78);
+            z-index:3100;align-items:center;justify-content:center;padding:16px;"
+            onclick="if(event.target===this)this.style.display='none'">
+            <div style="background:var(--bg-panel);border:1px solid var(--border-bright);
+              border-radius:10px;width:100%;max-width:440px;max-height:82vh;
+              display:flex;flex-direction:column;overflow:hidden;
+              box-shadow:0 8px 32px rgba(0,0,0,.55);">
+              <div style="display:flex;justify-content:space-between;align-items:center;
+                padding:11px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:var(--amber);">
+                  Table B — Max FDP (Lineholder, Acclimated)
+                </span>
+                <button onclick="document.getElementById('far117-tableb-modal').style.display='none'"
+                  style="background:none;border:none;color:var(--text-muted);
+                  font-size:20px;cursor:pointer;line-height:1;padding:0 2px;">&times;</button>
+              </div>
+              <div id="far117-tableb-body"
+                style="padding:10px 12px;overflow-y:auto;overflow-x:auto;flex:1;"></div>
+              <div style="padding:7px 14px;border-top:1px solid var(--border);flex-shrink:0;
+                font-family:var(--mono);font-size:10px;color:var(--text-muted);">
+                §117.13 · Hours · Highlighted = current calc · Tap outside to close
+              </div>
+            </div>
+          </div>
+
           <div id="far117-panel-168" style="display:none;">
             <div class="settings-section" style="margin-bottom:14px;">
               <div class="settings-section-title">§117.25(b) — 30 Consecutive Hours Free From Duty in 168 Hours</div>
@@ -3021,22 +3183,39 @@ window.addEventListener('offline', updateOnlineStatus);
 // Check immediately once DOM is ready
 document.addEventListener('DOMContentLoaded', updateOnlineStatus);
 document.addEventListener('DOMContentLoaded', () => {
-  // Sidebar defaults to open
-  document.getElementById('sidebar').classList.add('open');
-  document.getElementById('sidebar-tab').style.left = 'var(--sidebar-w)';
+  if (window.innerWidth > 600) {
+    document.getElementById('sidebar').classList.add('open');
+    document.getElementById('sidebar-tab').style.left = 'var(--sidebar-w)';
+  }
+  // Mobile: sidebar stays closed by default
 });
 
 // ── Sidebar push flyout ──────────────────────────────────────
+function _isMobile() { return window.innerWidth <= 600; }
+
 function sidebarToggle() {
-  const sidebar = document.getElementById('sidebar');
-  const tab     = document.getElementById('sidebar-tab');
-  const open    = sidebar.classList.toggle('open');
-  // Move tab to right edge of sidebar
-  tab.style.left = open ? 'var(--sidebar-w)' : '0';
+  const sidebar  = document.getElementById('sidebar');
+  const tab      = document.getElementById('sidebar-tab');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  const open     = sidebar.classList.toggle('open');
+  if (_isMobile()) {
+    tab.classList.toggle('sb-open', open);
+    if (backdrop) backdrop.classList.toggle('visible', open);
+  } else {
+    tab.style.left = open ? 'var(--sidebar-w)' : '0';
+  }
 }
 function sidebarClose() {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('sidebar-tab').style.left = '0';
+  const sidebar  = document.getElementById('sidebar');
+  const tab      = document.getElementById('sidebar-tab');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  sidebar.classList.remove('open');
+  if (_isMobile()) {
+    tab.classList.remove('sb-open');
+    if (backdrop) backdrop.classList.remove('visible');
+  } else {
+    tab.style.left = '0';
+  }
 }
 
 const DB_NAME    = 'pairboard_db';
@@ -4693,6 +4872,7 @@ const VIEW_TITLES = {
 };
 
 function switchView(name) {
+  if (_isMobile()) sidebarClose();
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('view-' + name).classList.add('active');
@@ -4715,6 +4895,7 @@ function switchView(name) {
   }
   if (name === 'far117') {
     far117SwitchTab('duty');
+    far117UpdateTZSource();
     // Default Zulu converter to device's current UTC offset
     const off = getLocalOffsetMins();
     const offStr = off === 0 ? '0' : (off > 0 ? '+' + Math.round(off/60) : String(Math.round(off/60)));
@@ -4736,6 +4917,8 @@ function updateTopbarMeta() {
 
   if (count === 0 && !code && !alv) {
     document.getElementById('topbar-meta').textContent = 'No pairing data loaded';
+    const _mbn = document.getElementById('topbar-meta-bar');
+    if (_mbn) _mbn.textContent = 'No pairing data loaded';
     return;
   }
 
@@ -4752,7 +4935,10 @@ function updateTopbarMeta() {
   if (guar)  parts.push(`Guar ${guar}`);
   if (count > 0) parts.push(`${count} pairings`);
 
-  document.getElementById('topbar-meta').textContent = parts.length ? parts.join(' · ') : 'No pairing data loaded';
+  const _metaStr = parts.length ? parts.join(' · ') : 'No pairing data loaded';
+  document.getElementById('topbar-meta').textContent = _metaStr;
+  const _mb = document.getElementById('topbar-meta-bar');
+  if (_mb) _mb.textContent = _metaStr;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -6476,7 +6662,20 @@ function far117SwitchTab(tab) {
   const inactiveStyle = 'color:var(--text-muted);border-bottom:2px solid transparent;';
   document.getElementById('far117-tab-duty').style.cssText += isDuty ? activeStyle : inactiveStyle;
   document.getElementById('far117-tab-168').style.cssText  += isDuty ? inactiveStyle : activeStyle;
-  if (!isDuty) calc168();
+  if (!isDuty) {
+    // Pre-fill rest date/time with current system time if fields are empty
+    const restDateEl = document.getElementById('far117-rest-date');
+    const restTimeEl = document.getElementById('far117-rest-time');
+    if (restDateEl && restTimeEl && !restDateEl.value && !restTimeEl.value) {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      // YYYY-MM-DD for the date picker
+      restDateEl.value = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+      // HH:MM (device local) for the time picker
+      restTimeEl.value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    }
+    calc168();
+  }
 }
 
 // ── 30/168 Calculator (§117.25(b)) ──────────────────────────
@@ -6825,22 +7024,126 @@ function initTheme() {
 }
 
 // ── UTC offset helpers ───────────────────────────────────────
+// Duty date context — set by OCR import or manual date picker.
+// Used by getFar117BaseOffset() to get DST-correct offset for the actual duty date,
+// not today's date (which may be in a different DST state).
+let _far117DutyDate      = null;  // set from OCR / date picker
+let _far117OCRLegs       = null;  // per-leg data from last OCR import
+let _far117DestOffsetMins = null;  // UTC offset (mins) of last arrival airport, from OCR
+let _far117DestCode       = null;  // IATA code of last arrival airport, from OCR
+
+function far117SetDutyDate() {
+  const val = document.getElementById('far117-duty-date')?.value;
+  if (val) {
+    // Construct a noon-UTC reference on that date (avoids day-boundary DST edges)
+    _far117DutyDate = new Date(val + 'T12:00:00Z');
+  } else {
+    _far117DutyDate = null;
+  }
+  calcFAR117();
+}
+
+// Returns the UTC offset (mins) for an IANA timezone at a specific date.
+// refDate: noon-UTC Date for DST accuracy.
+function getTimezoneOffsetForDate(iana, refDate) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: iana, hour: 'numeric', minute: 'numeric', hour12: false
+    }).formatToParts(refDate);
+    const h = parseInt(parts.find(p => p.type === 'hour')?.value)  % 24;
+    const m = parseInt(parts.find(p => p.type === 'minute')?.value);
+    return (h * 60 + m) - 720;  // local_at_noon_UTC − 720 = UTC offset
+  } catch(e) { return 0; }
+}
+
 function getLocalOffsetMins() {
   // Returns current UTC offset in minutes, e.g. -300 for EST, +60 for BST
   return -new Date().getTimezoneOffset();
 }
-// Returns offset for the FAR 117 base timezone selector (falls back to browser)
-function getFar117BaseOffset() {
+// Delta domicile → IANA timezone lookup (covers all current DL crew bases)
+const DELTA_BASE_TZ = {
+  // Eastern
+  NYC: 'America/New_York', JFK: 'America/New_York', LGA: 'America/New_York',
+  EWR: 'America/New_York', ATL: 'America/New_York', BOS: 'America/New_York',
+  DTW: 'America/New_York', CVG: 'America/New_York', RDU: 'America/New_York',
+  MCO: 'America/New_York', FLL: 'America/New_York', MIA: 'America/New_York',
+  CLT: 'America/New_York',
+  // Central
+  MSP: 'America/Chicago', ORD: 'America/Chicago', MDW: 'America/Chicago',
+  IAH: 'America/Chicago', DAL: 'America/Chicago', DFW: 'America/Chicago',
+  AUS: 'America/Chicago', STL: 'America/Chicago', MEM: 'America/Chicago',
+  BHM: 'America/Chicago',
+  // Mountain
+  SLC: 'America/Denver', DEN: 'America/Denver',
+  // Pacific
+  LAX: 'America/Los_Angeles', SEA: 'America/Los_Angeles',
+  SFO: 'America/Los_Angeles', SAN: 'America/Los_Angeles', PDX: 'America/Los_Angeles',
+  // Hawaii / Alaska
+  HNL: 'Pacific/Honolulu', ANC: 'America/Anchorage',
+};
+
+// Returns the IANA timezone for the active base (from bid pkg or manual),
+// or null if falling back to device local.
+function far117BaseTZName() {
   const sel = document.getElementById('far117-base-tz');
-  const tz  = sel ? sel.value : 'auto';
-  if (!tz || tz === 'auto') return getLocalOffsetMins();
+  const val = sel ? sel.value : 'auto';
+  if (val && val !== 'auto') return val;                       // explicit manual
+  const code = appState.baseCityCode?.toUpperCase();
+  if (code && DELTA_BASE_TZ[code]) return DELTA_BASE_TZ[code]; // bid package
+  return null;                                                  // device local
+}
+
+// Returns the base timezone UTC offset (mins) for the DUTY DATE, not today.
+// This ensures DST is correct when checking a winter trip in summer or vice versa.
+function getFar117BaseOffset() {
+  const tz = far117BaseTZName();
+  if (!tz) return getLocalOffsetMins();
   try {
-    const now   = new Date();
-    const utc   = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
-    const local = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+    // Use duty date reference if set; otherwise today (only affects DST-boundary cases)
+    const ref   = _far117DutyDate || new Date();
+    const utc   = new Date(ref.toLocaleString('en-US', { timeZone: 'UTC' }));
+    const local = new Date(ref.toLocaleString('en-US', { timeZone: tz }));
     return (local - utc) / 60000;
   } catch(e) {
     return getLocalOffsetMins();
+  }
+}
+
+// Updates the small "source" indicator below the Base Timezone selector
+function far117UpdateTZSource() {
+  const el = document.getElementById('far117-base-tz-source');
+  if (!el) return;
+  const sel = document.getElementById('far117-base-tz');
+  const val = sel ? sel.value : 'auto';
+  const off = getFar117BaseOffset();
+  const abs = Math.abs(off), sign = off >= 0 ? '+' : '-';
+  const h = Math.floor(abs/60), m = abs % 60;
+  const utcLabel = m > 0
+    ? `UTC${sign}${h}:${String(m).padStart(2,'0')}`
+    : `UTC${sign}${h}`;
+
+  // Show duty date context if set (clarifies DST state)
+  const dutyDateEl  = document.getElementById('far117-duty-date');
+  const dutyDateVal = dutyDateEl?.value || '';
+  const dutyDateSuffix = dutyDateVal
+    ? ` · ${new Date(dutyDateVal + 'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric'})}`
+    : (_far117DutyDate ? '' : ' · today');
+
+  if (val && val !== 'auto') {
+    // Manual selection
+    el.style.color = 'var(--text-muted)';
+    el.textContent = `Manual · ${utcLabel}${dutyDateSuffix}`;
+  } else {
+    const code = appState.baseCityCode?.toUpperCase();
+    if (code && DELTA_BASE_TZ[code]) {
+      // Bid package base
+      el.style.color = 'var(--green)';
+      el.textContent = `Bid pkg: ${code} · ${utcLabel}${dutyDateSuffix}`;
+    } else {
+      // Device local fallback
+      el.style.color = 'var(--amber)';
+      el.textContent = `Device local · ${utcLabel}${dutyDateSuffix}`;
+    }
   }
 }
 function offsetLabel() {
@@ -6906,7 +7209,23 @@ function calcFAR117() {
   const [rh, rm] = reportVal.split(':').map(Number);
   const reportMins = rh * 60 + rm;
   const baseOffset = getFar117BaseOffset();
+  far117UpdateTZSource();
   const reportMinsLocal = ((reportMins + baseOffset) % 1440 + 1440) % 1440;
+
+  // LLBI local time: show destination airport local if known from OCR, else base city
+  const llbiLocalStr = (zuluMins) => {
+    if (_far117DestOffsetMins !== null) {
+      const off = _far117DestOffsetMins;
+      const abs = Math.abs(off), sign = off >= 0 ? '+' : '-';
+      const h   = Math.floor(abs / 60), m = abs % 60;
+      const tz  = m > 0
+        ? `GMT${sign}${h}:${String(m).padStart(2,'0')}`
+        : `GMT${sign}${h}`.replace('GMT+0','GMT').replace('GMT-0','GMT');
+      const loc = zuluMinsToLocal(zuluMins, off);
+      return _far117DestCode ? `${loc}L (${_far117DestCode}·${tz})` : `${loc}L (${tz})`;
+    }
+    return localSubtext(zuluMins, baseOffset);
+  };
 
   let fdpStartMins = reportMins;
   if (fdpStartVal) {
@@ -7007,10 +7326,11 @@ function calcFAR117() {
           noteStr  ? ` <span style="color:var(--text-muted);font-size:10px;font-weight:400;">${noteStr}</span>` : ''}
       </span></div>`;
   }
-  function row(label, value, color, localStr, noteStr) {
+  function row(label, value, color, localStr, noteStr, onclick) {
     const c = color || 'var(--text-primary)';
     return `<div style="display:flex;justify-content:space-between;align-items:baseline;
-      padding:8px 0;border-bottom:1px solid var(--border);">
+      padding:8px 0;border-bottom:1px solid var(--border);${onclick ? 'cursor:pointer;' : ''}"
+      ${onclick ? `onclick="${onclick}"` : ''}>
       <span style="color:var(--text-muted);font-size:11px;">${label}</span>
       <span style="font-size:14px;font-weight:700;text-align:right;">
         <span style="color:${c};">${value}</span>${
@@ -7037,19 +7357,639 @@ function calcFAR117() {
     row('Report Time (Z)', far117FormatTime(reportMins), null, localSubtext(reportMins, baseOffset), null) +
     row('FDP Start (Z)', far117FormatTime(fdpStartMins), null,
         localSubtext(fdpStartMins, baseOffset), fdpStartVal ? null : '= report') +
-    row(`Max FDP (${tableLabel})`, far117FormatTime(maxFDP), 'var(--amber)', null, segNote) +
+    row(`Max FDP (${tableLabel}) <span style="font-size:9px;opacity:.65;">▸ table</span>`,
+        far117FormatTime(maxFDP), 'var(--amber)', null, segNote,
+        `far117ShowTableB(${reportMinsLocal},${segs})`) +
     row('Max Flight Time (Table A)', far117FormatTime(maxFT), 'var(--amber)', null, 'non-extendable') +
     row('LLBI — Normal (Z)', far117ClockTime(fdpStartMins, maxFDP), 'var(--green)',
-        localSubtext(llbi1, baseOffset), null) +
+        llbiLocalStr(llbi1), null) +
     rapLimitHtml +
     (rapOn && rapStartVal
       ? row('▶ Binding LLBI (Z)', far117ClockTime(0, bindingLLBI), bindingLabel==='RAP+FDP cap' ? '#e05555' : 'var(--green)',
-            localSubtext(bindingLLBI, baseOffset), null)
+            llbiLocalStr(bindingLLBI), null)
       : '') +
     bindingNote +
     woclNote + woclReportNote;
 
   calcLATT();
+
+  // Render timeline if OCR legs are available
+  const _tl_iana = far117BaseTZName();
+  far117RenderTimeline(reportMins, fdpStartMins, maxFDP, maxFT, baseOffset, _tl_iana);
+}
+
+
+// ── FAR 117 OCR Duty-Day Timeline ────────────────────────────────────────────
+// Renders a visual timeline when per-leg data is available from an OCR import.
+function far117RenderTimeline(reportMins, fdpStartMins, maxFDP, maxFT, baseOffset, iana) {
+  const el = document.getElementById('far117-ocr-timeline');
+  if (!el) return;
+
+  const legs = _far117OCRLegs;
+  if (!legs || legs.length === 0) { el.style.display = 'none'; return; }
+
+  // ── Window: report → LLBI (may cross midnight, keep as raw extended minutes) ──
+  const llbiMins  = fdpStartMins + maxFDP;  // e.g. 897 + 780 = 1677
+  const windowLen = llbiMins - reportMins;
+  if (windowLen <= 0) { el.style.display = 'none'; return; }
+
+  // Unwrap: if a Zulu time < reportMins it crossed midnight — extend by +1440
+  const unwrap = t => (t < reportMins ? t + 1440 : t);
+  // Position as % of window; input must already be unwrapped
+  const pct = t => Math.max(0, Math.min(100, (t - reportMins) / windowLen * 100));
+  // Zulu display label from raw (possibly wrapped) minutes
+  const zuluLabel = t => {
+    const m = ((t % 1440) + 1440) % 1440;
+    return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
+  };
+
+  // ── Resolve origin timezone offset (minutes) ──────────────────────────────
+  let originOffsetMins = baseOffset;
+  if (iana && _far117DutyDate) {
+    try { originOffsetMins = getTimezoneOffsetForDate(iana, _far117DutyDate); } catch(e) {}
+  }
+
+  function localToZuluMins(timeStr4, tzOffsetMins) {
+    const h = parseInt(timeStr4.slice(0,2)), m = parseInt(timeStr4.slice(2,4));
+    return (((h*60+m) - tzOffsetMins) % 1440 + 1440) % 1440;
+  }
+
+  // ── Build events ───────────────────────────────────────────────────────────
+  // Report is the anchor — always at position 0
+  const events = [{ rawT: reportMins, posT: reportMins, type: 'report' }];
+  let totalBlkMins = 0;
+  let lastArrPos   = null;  // unwrapped
+
+  for (let i = 0; i < legs.length; i++) {
+    const leg    = legs[i];
+    // cumulative TZ shift is in hours; convert to mins
+    const depTZ  = originOffsetMins + (i === 0 ? 0 : legs[i-1].tzShift) * 60;
+    const arrTZ  = originOffsetMins + leg.tzShift * 60;
+
+    if (leg.dep) {
+      const rawT = localToZuluMins(leg.dep, depTZ);
+      const posT = unwrap(rawT);
+      events.push({ rawT, posT, type: 'dep', legIdx: i });
+    }
+    if (leg.arr) {
+      const rawT = localToZuluMins(leg.arr, arrTZ);
+      const posT = unwrap(rawT);
+      events.push({ rawT, posT, type: 'arr', legIdx: i });
+      lastArrPos = posT;
+    }
+    if (leg.blkMins) totalBlkMins += leg.blkMins;
+  }
+
+  // ── FDP elapsed & colour ───────────────────────────────────────────────────
+  const fdpElapsedMins = lastArrPos !== null ? lastArrPos - reportMins : null;
+  const fdpRatio  = fdpElapsedMins !== null ? fdpElapsedMins / maxFDP : null;
+  const barColor  = fdpRatio === null ? 'var(--amber)'
+    : fdpRatio <= 0.75 ? 'var(--green)'
+    : fdpRatio <= 0.90 ? 'var(--amber)'
+    : '#e05555';
+
+  // ── Build markers with staggered labels ────────────────────────────────────
+  // Sort by position so we can detect close neighbours
+  const sorted = [...events].sort((a, b) => a.posT - b.posT);
+  const MIN_GAP_PCT = 7;   // labels closer than 7% get staggered
+  let above = true;        // alternates per close cluster
+
+  for (let i = 0; i < sorted.length; i++) {
+    const ev  = sorted[i];
+    const pxPct = pct(ev.posT);
+    ev.x = pxPct;
+    // Decide above/below
+    if (i === 0) {
+      ev.above = true;
+    } else {
+      const gap = pxPct - sorted[i-1].x;
+      if (gap < MIN_GAP_PCT) {
+        above = !above;    // toggle when crowded
+        ev.above = above;
+      } else {
+        above = true;      // reset: first in a new gap goes above
+        ev.above = true;
+      }
+    }
+  }
+
+  // Build tick HTML
+  let markers = '';
+  for (const ev of sorted) {
+    const isReport = ev.type === 'report';
+    const isDep    = ev.type === 'dep';
+    const color    = isReport ? 'var(--amber)' : isDep ? 'var(--blue)' : 'var(--green)';
+    const lbl      = zuluLabel(ev.rawT);
+    const topLabel = ev.above
+      ? `top:-20px`
+      : `top:14px`;   // below the 8px bar (bar is at ~26px below label strip)
+
+    markers += `
+      <div style="position:absolute;left:${ev.x.toFixed(2)}%;top:0;bottom:0;
+        width:2px;background:${color};opacity:0.85;transform:translateX(-50%);"></div>
+      <div style="position:absolute;left:${ev.x.toFixed(2)}%;${topLabel};
+        transform:translateX(-50%);white-space:nowrap;font-size:9px;
+        color:${color};font-family:var(--mono);">${lbl}</div>`;
+  }
+
+  const maxPct      = pct(llbiMins).toFixed(2);
+  const fillPct     = fdpElapsedMins !== null ? pct(reportMins + fdpElapsedMins).toFixed(2) : '0';
+  const fdpElH      = fdpElapsedMins !== null ? Math.floor(fdpElapsedMins/60) : 0;
+  const fdpElM      = fdpElapsedMins !== null ? fdpElapsedMins % 60 : 0;
+  const maxH        = Math.floor(maxFDP/60), maxM = maxFDP % 60;
+
+  // ── Block bar ──────────────────────────────────────────────────────────────
+  let blkBarHtml = '';
+  if (totalBlkMins > 0 && maxFT > 0) {
+    const blkRatio = totalBlkMins / maxFT;
+    const blkPct   = Math.min(100, blkRatio * 100).toFixed(1);
+    const blkColor = blkRatio <= 0.75 ? 'var(--green)' : blkRatio <= 0.90 ? 'var(--amber)' : '#e05555';
+    const blkH     = Math.floor(totalBlkMins/60), blkM = totalBlkMins % 60;
+    const mxH      = Math.floor(maxFT/60),        mxM  = maxFT % 60;
+    blkBarHtml = `
+      <div style="margin-top:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;
+          margin-bottom:4px;font-family:var(--mono);font-size:10px;">
+          <span style="color:var(--text-muted);">Block time</span>
+          <span style="color:${blkColor};">${blkH}:${String(blkM).padStart(2,'0')}
+            <span style="color:var(--text-muted);font-size:9px;"> / ${mxH}:${String(mxM).padStart(2,'0')} max</span>
+          </span>
+        </div>
+        <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+          <div style="height:100%;width:${blkPct}%;background:${blkColor};
+            border-radius:3px;transition:width .3s;"></div>
+        </div>
+      </div>`;
+  }
+
+  // ── Build route label (robust: chain origin → through → dest) ─────────────
+  // Don't trust positional route assignment from OCR; instead show what we know
+  const knownRoutes = legs.map(l => l.route).filter(Boolean);
+  const routeStr = knownRoutes.length > 0 ? knownRoutes.join(' \u00b7 ') : '';
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="border-top:1px solid var(--border);padding-top:12px;">
+      ${routeStr ? `<div style="font-family:var(--mono);font-size:11px;color:var(--text-secondary);
+        margin-bottom:10px;letter-spacing:.02em;">${routeStr}</div>` : ''}
+
+      <div style="display:flex;justify-content:space-between;align-items:baseline;
+        margin-bottom:4px;font-family:var(--mono);font-size:10px;">
+        <span style="color:var(--text-muted);">Duty period</span>
+        <span style="color:${barColor};">
+          ${fdpElapsedMins !== null ? `${fdpElH}:${String(fdpElM).padStart(2,'0')}` : '\u2014'}
+          <span style="color:var(--text-muted);font-size:9px;"> / ${maxH}:${String(maxM).padStart(2,'0')} max</span>
+        </span>
+      </div>
+
+      <!-- Timeline: labels above + below + bar -->
+      <div style="position:relative;margin-top:4px;padding:22px 0 28px;">
+        <!-- event ticks + staggered labels -->
+        <div style="position:relative;height:8px;background:var(--border);border-radius:4px;">
+          <!-- filled elapsed -->
+          <div style="position:absolute;left:0;top:0;height:100%;
+            width:${fillPct}%;background:${barColor};border-radius:4px;opacity:0.85;
+            transition:width .3s;"></div>
+          <!-- LLBI tick -->
+          <div style="position:absolute;left:${maxPct}%;top:0;bottom:0;
+            width:2px;background:var(--amber);opacity:0.95;transform:translateX(-50%);"></div>
+          ${markers}
+        </div>
+        <!-- LLBI label below bar -->
+        <div style="position:absolute;left:${maxPct}%;bottom:8px;transform:translateX(-50%);
+          font-family:var(--mono);font-size:9px;color:var(--amber);white-space:nowrap;">LLBI</div>
+      </div>
+
+      ${blkBarHtml}
+    </div>`;
+}
+
+// \u2500\u2500 FAR 117 Screenshot Import ────────────────────────────────────────────────
+
+// Parse Ezio's Family duty period screenshot OCR text into structured data
+function far117ParseEzioText(text) {
+  const result = {
+    schedReport:    null,   // "HHMM"
+    actualReport:   null,   // "HHMM" or null
+    segments:       0,
+    originCode:     null,   // IATA code
+    destCode:       null,
+    netTzOffsetHrs: 0,      // cumulative offset across all legs
+    dateStr:        null,   // "DDMMM" e.g. "13APR"
+    warnings:       [],
+    legs:           [],     // [{dep:"HHMM", arr:"HHMM", blkMins:N, route:"BHM-ATL", tzShift:N}]
+  };
+
+  // Sched report: "Rpt- 1057 13APR" (Arr line in first-leg detail block)
+  const rptM = text.match(/Rpt\s*[-–]\s*(\d{4})\s+(\d{1,2}[A-Za-z]{3})/);
+  if (rptM) { result.schedReport = rptM[1]; result.dateStr = rptM[2].toUpperCase(); }
+  else result.warnings.push('Could not find report time (Rpt-)');
+
+  // Actual report: "Apr Rpt- 1057" — only capture if a time follows
+  const aprM = text.match(/Apr\s+Rpt\s*[-–]\s*(\d{4})/i);
+  if (aprM) result.actualReport = aprM[1];
+
+  // Segment count: count Dep- occurrences (white detail rows — reliable OCR)
+  result.segments = Math.max((text.match(/Dep\s*[-–]\s+\d{4}/g) || []).length, 1);
+
+  // Origin airport from first flight header: "DL1618 : BHM-ATL" (white on dark)
+  // Origin + destination from flight headers: "DL1618 : BHM-ATL" (white on dark blue)
+  const allHdrMs = [...text.matchAll(/DL\s*\d+\s*[:\-\.|\s]\s*([A-Z]{3})[-–]?([A-Z]{3})/gi)];
+  if (allHdrMs.length > 0) {
+    result.originCode = allHdrMs[0][1].toUpperCase();
+    result.destCode   = allHdrMs[allHdrMs.length - 1][2].toUpperCase();
+  } else {
+    const fb = text.match(/([A-Z]{3})\s*[-–]\s*([A-Z]{3})/);
+    if (fb) { result.originCode = fb[1].toUpperCase(); result.destCode = fb[2].toUpperCase(); }
+    else result.warnings.push('Could not determine origin airport — will use base timezone');
+  }
+
+  // Cumulative timezone offset: "+1hr", "-2hr" on Arr- lines
+  const tzMs = [...text.matchAll(/Arr[-–].*?([+-]\d+)\s*hr/gi)];
+  for (const m of tzMs) result.netTzOffsetHrs += parseInt(m[1].replace(/\s/g, ''));
+
+  // Per-leg extraction — walk through Dep / Arr / Blk blocks
+  // Also capture route codes from headers for labelling.
+  // OCR sometimes misses the first header (dark blue background) — if we have
+  // fewer routes than legs, assume the FIRST (depTimes.length - routeCodes.length)
+  // legs had their headers missed, and shift assignment accordingly.
+  const routeCodes  = allHdrMs.map(m => `${m[1].toUpperCase()}-${m[2].toUpperCase()}`);
+  const depTimes    = [...text.matchAll(/Dep[-–]\s+(\d{4})/gi)].map(m => m[1]);
+  const routeOffset = depTimes.length - routeCodes.length;  // 0 if all headers found
+  const arrLines   = [...text.matchAll(/Arr[-–]\s+(\d{4})[^\n]*?(?:([+-]\d+)\s*hr)?/gi)];
+  const blkLines   = [...text.matchAll(/Blk[-–]\s*(\d+):(\d{2})/gi)];
+
+  // When OCR misses the first flight header, try to infer leg[0]'s origin.
+  // Strategy 1: "LAYOVER: XXX" block that precedes the first flight in Ezio.
+  // Try permissive match — OCR may drop the colon or misspell LAYOVER.
+  const layoverM    = text.match(/(?:LAYOVER|la[yv]o[yv]er)\s*[:\-]?\s*([A-Z]{3})/i);
+  const layoverCity = layoverM ? layoverM[1].toUpperCase() : null;
+
+  let cumTZshift   = 0;
+  for (let i = 0; i < depTimes.length; i++) {
+    const arr       = arrLines[i] ? arrLines[i][1] : null;
+    const tzShift   = arrLines[i]?.[2] ? parseInt(arrLines[i][2]) : 0;
+    cumTZshift += tzShift;
+    let blkMins = null;
+    if (blkLines[i]) blkMins = parseInt(blkLines[i][1]) * 60 + parseInt(blkLines[i][2]);
+
+    // Route from headers (offset-adjusted); if first leg was missed, infer from layover city
+    let route = routeCodes[i - routeOffset] || null;
+    if (!route && i === 0 && layoverCity && routeCodes.length > 0) {
+      route = `${layoverCity}-${routeCodes[0].split('-')[0]}`;
+    }
+
+    result.legs.push({
+      dep:     depTimes[i],
+      arr:     arr,
+      blkMins: blkMins,
+      route,
+      tzShift: cumTZshift,   // cumulative offset at this arrival
+    });
+  }
+
+  // Final fallback: if first leg route still unknown, search the OCR text
+  // BEFORE the Rpt- line for any XXX-YYY or XXX YYY airport pair.
+  if (result.legs.length > 0 && !result.legs[0].route) {
+    const rptIdx = text.search(/Rpt\s*[-–]/i);
+    const searchZone = rptIdx > 0 ? text.slice(0, rptIdx) : text.slice(0, 300);
+    // Accept hyphen, en-dash, or whitespace between city codes
+    const m = searchZone.match(/\b([A-Z]{3})\s*[-–\s]\s*([A-Z]{3})\b/);
+    if (m) result.legs[0].route = `${m[1]}-${m[2]}`;
+  }
+
+  // Last resort: if we know leg[1]'s origin (= leg[0]'s destination) and have
+  // a layover city, reconstruct. Also try: leg[0] dest = routeCodes[0] origin.
+  if (result.legs.length > 0 && !result.legs[0].route && routeCodes.length > 0) {
+    const leg0dest = routeCodes[0].split('-')[0];  // e.g. "ATL" from "ATL-CVG"
+    // Use layover city as origin if found, else leave null
+    if (layoverCity) result.legs[0].route = `${layoverCity}-${leg0dest}`;
+  }
+
+  return result;
+}
+
+// Convert 4-digit local time to HH:MM Zulu using IANA timezone + date context
+function far117LocalToZulu(timeStr4, dateStr5, ianaTimezone) {
+  const MONTHS = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+  const day    = parseInt(dateStr5.slice(0, 2));
+  const monKey = dateStr5.slice(2).toUpperCase().slice(0, 3);
+  const mon    = MONTHS[monKey];
+  if (mon === undefined || isNaN(day)) return null;
+
+  const localH = parseInt(timeStr4.slice(0, 2));
+  const localM = parseInt(timeStr4.slice(2, 4));
+  const localMins = localH * 60 + localM;
+
+  try {
+    // Get offset on this specific date (handles DST correctly)
+    // Reference: noon UTC on the given date — unambiguous, no DST-edge issues
+    const refDate = new Date(Date.UTC(new Date().getFullYear(), mon, day, 12, 0, 0));
+    const parts   = new Intl.DateTimeFormat('en-US', {
+      timeZone: ianaTimezone, hour: 'numeric', minute: 'numeric', hour12: false
+    }).formatToParts(refDate);
+    const localHAtNoon = parseInt(parts.find(p => p.type === 'hour')?.value)  % 24;
+    const localMAtNoon = parseInt(parts.find(p => p.type === 'minute')?.value);
+    // offset (mins) = local_time − UTC_time; ref UTC is 12:00 (720 mins)
+    const offsetMins = (localHAtNoon * 60 + localMAtNoon) - 720;
+
+    const zuluMins = ((localMins - offsetMins) % 1440 + 1440) % 1440;
+    return String(Math.floor(zuluMins / 60)).padStart(2, '0') + ':' +
+           String(zuluMins % 60).padStart(2, '0');
+  } catch(e) { return null; }
+}
+
+// Render the confirmation card from a parsed result object
+function far117ShowOCRConfirm(parsed) {
+  const conf = document.getElementById('far117-ocr-confirm');
+  const body = document.getElementById('far117-ocr-confirm-body');
+  if (!conf || !body) return;
+
+  // Resolve which IANA timezone to use for local→Zulu conversion
+  // Priority: manual dropdown > parsed origin > bid package base
+  const sel = document.getElementById('far117-base-tz');
+  const manualTZ = (sel && sel.value !== 'auto') ? sel.value : null;
+  const originTZ = parsed.originCode ? DELTA_BASE_TZ[parsed.originCode] : null;
+  const baseTZ   = appState.baseCityCode ? DELTA_BASE_TZ[appState.baseCityCode.toUpperCase()] : null;
+  const iana     = manualTZ || originTZ || baseTZ || null;
+
+  // Convert both report times
+  const schedZ  = (parsed.schedReport  && parsed.dateStr && iana)
+    ? far117LocalToZulu(parsed.schedReport,  parsed.dateStr, iana) : null;
+  const actualZ = (parsed.actualReport && parsed.dateStr && iana)
+    ? far117LocalToZulu(parsed.actualReport, parsed.dateStr, iana) : null;
+
+  const fmtL = t => t ? `${t.slice(0,2)}:${t.slice(2)}L` : '—';
+  const fmtZ = t => t ? `${t}Z` : '(unknown TZ)';
+
+  const tzLabel = iana
+    ? `${parsed.originCode || appState.baseCityCode || ''} · ${iana.split('/').pop().replace(/_/g,' ')}`
+    : 'Unknown — set Base Timezone manually';
+
+  // Build rows
+  const row = (lbl, val, sub, col) =>
+    `<div style="display:flex;justify-content:space-between;align-items:baseline;
+      padding:4px 0;border-bottom:1px solid var(--border);">
+      <span style="color:var(--text-muted);font-size:11px;">${lbl}</span>
+      <span style="font-weight:600;color:${col||'var(--text-primary)'};">${val}
+        ${sub?`<span style="color:var(--text-muted);font-size:10px;font-weight:400;"> ${sub}</span>`:''}
+      </span></div>`;
+
+  let html = '';
+  html += row('Origin / TZ', tzLabel, null, iana ? 'var(--blue)' : 'var(--amber)');
+  html += row('Sched report',
+    fmtL(parsed.schedReport),
+    schedZ ? `→ ${fmtZ(schedZ)}` : '(set TZ above first)',
+    schedZ ? null : 'var(--amber)');
+
+  if (parsed.actualReport) {
+    html += row('Actual report',
+      fmtL(parsed.actualReport),
+      actualZ ? `→ ${fmtZ(actualZ)}` : '(set TZ above first)',
+      actualZ ? 'var(--green)' : 'var(--amber)');
+  }
+
+  html += row('Segments', String(parsed.segments), null, 'var(--amber)');
+
+  if (parsed.netTzOffsetHrs !== 0) {
+    html += row('Cumul. TZ shift',
+      `${parsed.netTzOffsetHrs > 0 ? '+' : ''}${parsed.netTzOffsetHrs} hr`,
+      'across legs', 'var(--text-secondary)');
+  }
+
+  if (parsed.warnings.length) {
+    html += `<div style="color:var(--amber);font-size:10px;padding:4px 0;border-bottom:1px solid var(--border);">
+      ⚠ ${parsed.warnings.join(' · ')}</div>`;
+  }
+
+  // If both reports present and both converted, show radio chooser
+  const hasBoth = !!(schedZ && actualZ && parsed.actualReport);
+  if (hasBoth) {
+    html += `<div style="padding:6px 0;">
+      <div style="color:var(--text-muted);font-size:11px;margin-bottom:5px;">Use which report time?</div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;margin-bottom:4px;cursor:pointer;">
+        <input type="radio" name="far117-rpt-choice" value="actual" checked
+          style="accent-color:var(--amber);width:13px;height:13px;">
+        <span>Actual <b style="color:var(--green);">${fmtZ(actualZ)}</b>
+          <span style="color:var(--text-muted);font-size:10px;"> — true FDP duration</span></span>
+      </label>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;">
+        <input type="radio" name="far117-rpt-choice" value="sched"
+          style="accent-color:var(--amber);width:13px;height:13px;">
+        <span>Scheduled <b>${fmtZ(schedZ)}</b>
+          <span style="color:var(--text-muted);font-size:10px;"> — Table B lookup</span></span>
+      </label>
+    </div>`;
+  }
+
+  body.innerHTML = html;
+
+  // Stash on element for Apply
+  conf._parsed  = parsed;
+  conf._schedZ  = schedZ;
+  conf._actualZ = actualZ;
+  conf._hasBoth = hasBoth;
+
+  conf.style.display = 'block';
+}
+
+function far117OCRApply() {
+  const conf = document.getElementById('far117-ocr-confirm');
+  if (!conf?._parsed) return;
+
+  const parsed = conf._parsed;
+
+  // Determine which Zulu time to put into the report-time field
+  let reportZ = conf._schedZ;  // default: scheduled
+  if (conf._hasBoth) {
+    const choice = document.querySelector('input[name="far117-rpt-choice"]:checked')?.value;
+    reportZ = (choice === 'actual') ? conf._actualZ : conf._schedZ;
+  } else if (conf._actualZ) {
+    reportZ = conf._actualZ;
+  }
+
+  if (reportZ) document.getElementById('far117-report-time').value = reportZ;
+
+  // Set duty date from OCR so DST offset is correct for that duty day, not today
+  if (parsed.dateStr) {
+    const MONTHS = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+    const dd  = parseInt(parsed.dateStr.slice(0, 2));
+    const mon = MONTHS[parsed.dateStr.slice(2, 5).toUpperCase()];
+    if (mon !== undefined) {
+      const yr  = new Date().getFullYear();
+      _far117DutyDate = new Date(Date.UTC(yr, mon, dd, 12, 0, 0));
+      // Also populate the date picker (ISO format YYYY-MM-DD)
+      const dateEl = document.getElementById('far117-duty-date');
+      if (dateEl) dateEl.value = `${yr}-${String(mon+1).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+    }
+  }
+
+  // Compute destination timezone offset for LLBI local time display
+  _far117DestOffsetMins = null;
+  _far117DestCode       = null;
+  if (parsed.originCode && typeof parsed.netTzOffsetHrs === 'number' && _far117DutyDate) {
+    const originIANA = DELTA_BASE_TZ[parsed.originCode] || null;
+    if (originIANA) {
+      const originOffset = getTimezoneOffsetForDate(originIANA, _far117DutyDate);
+      _far117DestOffsetMins = originOffset + parsed.netTzOffsetHrs * 60;
+    }
+  }
+  if (parsed.destCode) _far117DestCode = parsed.destCode;
+
+  // If both reports present and they differ, also populate FDP start with actual
+  if (conf._hasBoth && conf._actualZ !== conf._schedZ) {
+    const choice = document.querySelector('input[name="far117-rpt-choice"]:checked')?.value;
+    if (choice === 'sched' && conf._actualZ) {
+      // User chose sched for Table B lookup → put actual in FDP start for LLBI
+      document.getElementById('far117-fdp-start').value = conf._actualZ;
+    }
+  }
+
+  // Segments (cap at 7 for the "7+" option)
+  const segSel = document.getElementById('far117-segments');
+  if (segSel && parsed.segments >= 1) {
+    const v = parsed.segments >= 7 ? '7' : String(parsed.segments);
+    segSel.value = v;
+  }
+
+  // Stash legs for timeline visualization
+  _far117OCRLegs = (parsed.legs && parsed.legs.length > 0) ? parsed.legs : null;
+
+  conf.style.display = 'none';
+  calcFAR117();
+  toast('Imported from screenshot', 'success');
+}
+
+function far117OCRDismiss() {
+  const el = document.getElementById('far117-ocr-confirm');
+  if (el) el.style.display = 'none';
+  _far117OCRLegs = null;
+  const tl = document.getElementById('far117-ocr-timeline');
+  if (tl) tl.style.display = 'none';
+}
+
+function far117ToggleRawOCR() {
+  const conf   = document.getElementById('far117-ocr-confirm');
+  const rawDiv = document.getElementById('far117-ocr-raw');
+  if (!rawDiv) return;
+  const visible = rawDiv.style.display !== 'none';
+  if (!visible) {
+    rawDiv.textContent = conf?._rawOCR || '(no OCR text stored)';
+    rawDiv.style.display = 'block';
+  } else {
+    rawDiv.style.display = 'none';
+  }
+}
+
+async function far117ImportScreenshot(file) {
+  const progressEl = document.getElementById('far117-ocr-progress');
+  const statusEl   = document.getElementById('far117-ocr-status');
+  const pctEl      = document.getElementById('far117-ocr-pct');
+  const barEl      = document.getElementById('far117-ocr-bar');
+
+  // Reset and show progress
+  document.getElementById('far117-ocr-confirm').style.display = 'none';
+  pctEl.textContent     = '0%';
+  barEl.style.width     = '0%';
+  statusEl.textContent  = 'Loading OCR engine…';
+  statusEl.style.color  = 'var(--text-muted)';
+  progressEl.style.display = 'block';
+
+  try {
+    await rotLoadTesseract();
+  } catch(e) {
+    statusEl.textContent = 'OCR engine failed — check connection';
+    statusEl.style.color = '#e05555';
+    setTimeout(() => { progressEl.style.display = 'none'; }, 3500);
+    return;
+  }
+
+  statusEl.textContent = 'Recognising text…';
+
+  try {
+    const result = await Tesseract.recognize(file, 'eng', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          const pct = Math.round((m.progress || 0) * 100);
+          pctEl.textContent  = pct + '%';
+          barEl.style.width  = pct + '%';
+        } else if (m.status === 'loading language traineddata') {
+          statusEl.textContent = 'Downloading language data (one-time, ~4 MB)…';
+        } else if (m.status === 'initializing api') {
+          statusEl.textContent = 'Initialising OCR engine…';
+        }
+      }
+    });
+
+    progressEl.style.display = 'none';
+    const text = (result.data?.text || '').trim();
+
+    if (!text) {
+      toast('No text detected — try a clearer screenshot', 'error');
+      return;
+    }
+
+    const parsed = far117ParseEzioText(text);
+
+    if (!parsed.schedReport) {
+      toast('Could not find report time in image — is this a duty period screenshot?', 'error');
+      return;
+    }
+
+    // Store raw OCR text for debug display
+    const conf = document.getElementById('far117-ocr-confirm');
+    if (conf) conf._rawOCR = text;
+
+    far117ShowOCRConfirm(parsed);
+
+  } catch(e) {
+    progressEl.style.display = 'none';
+    toast('OCR failed: ' + e.message, 'error');
+  }
+}
+
+// ── FAR 117 Table B popup ────────────────────────────────────────────────────
+function far117ShowTableB(reportMinsLocal, segs) {
+  const modal = document.getElementById('far117-tableb-modal');
+  if (!modal) return;
+
+  const curRowIdx = FAR117_TABLE_B.findIndex(r => reportMinsLocal >= r[0] && reportMinsLocal <= r[1]);
+  const curColIdx = Math.min(segs, 7) - 1;
+
+  const ROW_LABELS = [
+    '0000–0359','0400–0459','0500–0559','0600–0659','0700–1159',
+    '1200–1259','1300–1659','1700–2159','2200–2259','2300–2359'
+  ];
+
+  const fmtV = mins => {
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return m ? `${h}:${String(m).padStart(2,'0')}` : `${h}:00`;
+  };
+
+  let html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;"><thead><tr>'
+    + '<th style="padding:5px 8px;border:1px solid var(--border);color:var(--text-muted);font-size:10px;text-align:left;font-weight:500;white-space:nowrap;">Base start<br>(local)</th>';
+
+  for (let c = 0; c < 7; c++) {
+    const act = c === curColIdx;
+    html += `<th style="padding:5px 4px;border:1px solid var(--border);text-align:center;font-size:10px;font-weight:500;${act ? 'color:var(--amber);background:rgba(245,176,48,.14);' : 'color:var(--text-muted);'}">${c < 6 ? c+1 : '7+'}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (let r = 0; r < FAR117_TABLE_B.length; r++) {
+    const limits = FAR117_TABLE_B[r][2];
+    const actRow = r === curRowIdx;
+    html += `<tr style="${actRow ? 'background:rgba(245,176,48,.08);' : ''}"><td style="padding:5px 8px;border:1px solid var(--border);font-size:10px;white-space:nowrap;${actRow ? 'color:var(--amber);font-weight:600;' : 'color:var(--text-muted);'}">${ROW_LABELS[r]}</td>`;
+    for (let c = 0; c < 7; c++) {
+      const actCell = actRow && c === curColIdx;
+      const actCol  = c === curColIdx;
+      html += `<td style="padding:5px 4px;border:1px solid var(--border);text-align:center;font-size:11px;${actCell ? 'background:var(--amber);color:#000;font-weight:700;' : actRow ? 'color:var(--amber);font-weight:600;' : actCol ? 'background:rgba(245,176,48,.05);color:var(--text-secondary);' : 'color:var(--text-secondary);'}">${fmtV(limits[c])}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table></div>';
+
+  document.getElementById('far117-tableb-body').innerHTML = html;
+  modal.style.display = 'flex';
 }
 
 // ── Zulu converter ───────────────────────────────────────────
@@ -7507,6 +8447,18 @@ function pairingMatchesAwardFilter(p, f) {
     if (f.params.op === 'range') return v >= f.params.min && v <= f.params.max;
   }
   if (f.type === 'pairing' && f.subtype === 'has-dh')     return f.params.value ? !!p.containsDH     : !p.containsDH;
+  if (f.type === 'pairing' && f.subtype === 'has-dh-position') {
+    const d0 = p.tripDays[0], dN = p.tripDays[p.tripDays.length - 1];
+    const front = !!(d0?.legs?.length > 0 && d0.legs[0].isDH);
+    const back  = !!(dN?.legs?.length > 0 && dN.legs[dN.legs.length - 1].isDH);
+    const any   = p.tripDays.some(d => d.legs.some(l => l.isDH));
+    let match;
+    if (f.params.pos === 'front')      match = front;
+    else if (f.params.pos === 'back')  match = back;
+    else if (f.params.pos === 'front-back') match = f.params.logic === 'and' ? front && back : front || back;
+    else                               match = any;
+    return f.params.op === 'avoid' ? !match : match;
+  }
   if (f.type === 'pairing' && f.subtype === 'has-redeye') return f.params.value ? !!p.containsRedeye : !p.containsRedeye;
   if (f.type === 'layover' && f.subtype === 'station') {
     const cities = new Set((f.params.stations||[]).map(c => c.toUpperCase()));
@@ -7778,6 +8730,28 @@ function applyFilters() {
       });
     }
     if (f.type === 'pairing' && f.subtype === 'has-dh')     result = result.filter(p => f.params.value ? !!p.containsDH     : !p.containsDH);
+    if (f.type === 'pairing' && f.subtype === 'has-dh-position') {
+      const dhFront = p => {
+        const d0 = p.tripDays[0]; return !!(d0?.legs?.length > 0 && d0.legs[0].isDH);
+      };
+      const dhBack = p => {
+        const dN = p.tripDays[p.tripDays.length - 1];
+        return !!(dN?.legs?.length > 0 && dN.legs[dN.legs.length - 1].isDH);
+      };
+      const dhAnywhere = p => p.tripDays.some(d => d.legs.some(l => l.isDH));
+      result = result.filter(p => {
+        let match;
+        const pos = f.params.pos;
+        if (pos === 'front')      match = dhFront(p);
+        else if (pos === 'back')  match = dhBack(p);
+        else if (pos === 'front-back') {
+          match = f.params.logic === 'and'
+            ? dhFront(p) && dhBack(p)
+            : dhFront(p) || dhBack(p);
+        } else                    match = dhAnywhere(p);
+        return f.params.op === 'avoid' ? !match : match;
+      });
+    }
     if (f.type === 'pairing' && f.subtype === 'has-redeye') result = result.filter(p => f.params.value ? !!p.containsRedeye : !p.containsRedeye);
     if (f.type === 'layover' && f.subtype === 'station') {
       const cities = new Set((f.params.stations||[]).map(c => c.toUpperCase()));
@@ -7837,6 +8811,8 @@ function applyFilters() {
     if (sort === 'credit-asc')   return a.creditHours - b.creditHours;
     if (sort === 'days-desc')    return b.days - a.days;
     if (sort === 'days-asc')     return a.days - b.days;
+    if (sort === 'pay-desc')     return (b.payTL || 0) - (a.payTL || 0);
+    if (sort === 'pay-asc')      return (a.payTL || 0) - (b.payTL || 0);
     return a.number.localeCompare(b.number);
   }
   result.sort(sorter);
@@ -7872,14 +8848,13 @@ function toggleFavorite(num, e) {
   }
   // Persist
   dbPut(STORE_META, { key: 'favorites', value: JSON.stringify([...appState.favorites]) });
-  // Update just this card's star without re-rendering the whole list
-  const btn = document.querySelector(`.fav-btn[data-num="${num}"]`);
-  if (btn) {
+  // Update every card showing this pairing (pairings list + any open modal)
+  document.querySelectorAll(`.fav-btn[data-num="${num}"]`).forEach(btn => {
     const isFav = appState.favorites.has(num);
     btn.textContent = isFav ? '★' : '☆';
     btn.style.color = isFav ? 'var(--amber)' : 'var(--text-muted)';
     btn.title = isFav ? 'Remove from favorites' : 'Mark as favorite';
-  }
+  });
 }
 
 function renderTripList() {
@@ -8302,7 +9277,7 @@ function fbSelectCategory(cat) {
         <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbShowPairingParam('avg-daily-credit')">Avg daily credit</button>
         <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbShowPairingParam('depart-day')">Departs on day of week</button>
         <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbShowLandingsIn()">Landings in airport</button>
-        <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbShowPairingBool('has-dh','deadhead')">Contains deadhead</button>
+        <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbShowDHFilter()">Contains deadhead</button>
         <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbShowPairingBool('has-redeye','redeye')">Contains redeye</button>
         ${back}
       </div>`;
@@ -8653,6 +9628,108 @@ function fbApplyDepartDay() {
   if (days.length === 0) { document.getElementById('fb-err').textContent = 'Select at least one day.'; return; }
   const exclude = _fbMode === 'avoid';
   fbCommitFilter({ type:'pairing', subtype:'depart-day', mode:_fbMode, params:{ days, exclude } });
+}
+
+// ── DH filter (position-aware) ───────────────────────────────
+function fbShowDHFilter() {
+  document.getElementById('fb-title').textContent = 'Deadhead — Position';
+  const body = document.getElementById('fb-body');
+  const back = `<button class="btn btn-ghost btn-sm" style="color:var(--text-muted);font-size:10px;margin-top:4px;" onclick="fbSelectCategory('pairing')">← Back</button>`;
+  body.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px;font-family:var(--mono);font-size:12px;">
+      <!-- Avoid / Include toggle -->
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:5px;">Action</div>
+        <div style="display:flex;gap:6px;">
+          <button id="dh-op-avoid"   onclick="fbDHSetOp('avoid')"
+            style="font-family:var(--mono);font-size:11px;padding:4px 14px;border-radius:20px;cursor:pointer;
+            border:1px solid var(--amber);background:var(--amber-glow);color:var(--amber);">Avoid</button>
+          <button id="dh-op-include" onclick="fbDHSetOp('include')"
+            style="font-family:var(--mono);font-size:11px;padding:4px 14px;border-radius:20px;cursor:pointer;
+            border:1px solid var(--border);background:transparent;color:var(--text-muted);">Include</button>
+        </div>
+      </div>
+
+      <!-- Position -->
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:5px;">DH Position</div>
+        <div style="display:flex;flex-direction:column;gap:5px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="radio" name="dh-pos" value="anywhere" checked
+              style="accent-color:var(--amber);width:14px;height:14px;" onchange="fbDHPosChange()">
+            <span><b>Anywhere</b> — any DH leg in the pairing</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="radio" name="dh-pos" value="front"
+              style="accent-color:var(--amber);width:14px;height:14px;" onchange="fbDHPosChange()">
+            <span><b>Front end</b> — first leg, day 1 is DH</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="radio" name="dh-pos" value="back"
+              style="accent-color:var(--amber);width:14px;height:14px;" onchange="fbDHPosChange()">
+            <span><b>Back end</b> — last leg, last day is DH</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="radio" name="dh-pos" value="front-back"
+              style="accent-color:var(--amber);width:14px;height:14px;" onchange="fbDHPosChange()">
+            <span><b>Front &amp; Back end</b></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- AND/OR — only visible when front-back selected -->
+      <div id="dh-logic-row" style="display:none;">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:5px;">Logic</div>
+        <div style="display:flex;gap:6px;">
+          <button id="dh-logic-and" onclick="fbDHSetLogic('and')"
+            style="font-family:var(--mono);font-size:11px;padding:4px 14px;border-radius:20px;cursor:pointer;
+            border:1px solid var(--amber);background:var(--amber-glow);color:var(--amber);">AND — both</button>
+          <button id="dh-logic-or" onclick="fbDHSetLogic('or')"
+            style="font-family:var(--mono);font-size:11px;padding:4px 14px;border-radius:20px;cursor:pointer;
+            border:1px solid var(--border);background:transparent;color:var(--text-muted);">OR — either/both</button>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-sm" onclick="fbApplyDHFilter()">Apply</button>
+      ${back}
+    </div>`;
+
+  _fbDHOp    = 'avoid';
+  _fbDHLogic = 'and';
+}
+
+let _fbDHOp    = 'avoid';
+let _fbDHLogic = 'and';
+
+function fbDHSetOp(op) {
+  _fbDHOp = op;
+  const ACT = 'font-family:var(--mono);font-size:11px;padding:4px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--amber);background:var(--amber-glow);color:var(--amber);';
+  const INA = 'font-family:var(--mono);font-size:11px;padding:4px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-muted);';
+  document.getElementById('dh-op-avoid').style.cssText   = op === 'avoid'   ? ACT : INA;
+  document.getElementById('dh-op-include').style.cssText = op === 'include' ? ACT : INA;
+}
+
+function fbDHSetLogic(lg) {
+  _fbDHLogic = lg;
+  const ACT = 'font-family:var(--mono);font-size:11px;padding:4px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--amber);background:var(--amber-glow);color:var(--amber);';
+  const INA = 'font-family:var(--mono);font-size:11px;padding:4px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-muted);';
+  document.getElementById('dh-logic-and').style.cssText = lg === 'and' ? ACT : INA;
+  document.getElementById('dh-logic-or').style.cssText  = lg === 'or'  ? ACT : INA;
+}
+
+function fbDHPosChange() {
+  const pos = document.querySelector('input[name="dh-pos"]:checked')?.value;
+  document.getElementById('dh-logic-row').style.display = pos === 'front-back' ? 'block' : 'none';
+}
+
+function fbApplyDHFilter() {
+  const pos = document.querySelector('input[name="dh-pos"]:checked')?.value || 'anywhere';
+  fbCommitFilter({
+    type:   'pairing',
+    subtype:'has-dh-position',
+    mode:   'avoid',
+    params: { op: _fbDHOp, pos, logic: _fbDHLogic }
+  });
 }
 
 function fbShowPairingBool(subtype, label) {
@@ -9057,6 +10134,14 @@ function renderOccFilterList() {
       else if (f.params.op === 'min') v = `≥ ${f.params.min}`;
       else if (f.params.op === 'max') v = `≤ ${f.params.max}`;
       else if (f.params.days) v = f.params.days.join(' ');
+      else if (f.subtype === 'has-dh-position') {
+        const opStr  = f.params.op  === 'avoid'      ? 'Avoid' : 'Include';
+        const posStr = f.params.pos === 'front'       ? 'front-end DH'
+                     : f.params.pos === 'back'        ? 'back-end DH'
+                     : f.params.pos === 'front-back'  ? `front ${f.params.logic.toUpperCase()} back DH`
+                     : 'any DH';
+        return `<span style="color:var(--text-muted);">DH:</span> ${opStr} ${posStr} ${modeTag}`;
+      }
       else if (f.params.value !== undefined) v = f.params.value ? 'yes' : 'no';
       return `<span style="color:var(--text-muted);">${n}:</span> ${v} ${modeTag}`;
     }
@@ -9294,6 +10379,149 @@ function renderPairingCalendar(p, survivingDays) {
 // ─────────────────────────────────────────────────────────────
 // DASHBOARD
 // ─────────────────────────────────────────────────────────────
+// ── Trip-length drill-down modal ────────────────────────────────
+function dashShowLengthModal(len) {
+  const modal   = document.getElementById('dash-length-modal');
+  const titleEl = document.getElementById('dash-length-modal-title');
+  const listEl  = document.getElementById('dash-length-modal-list');
+  if (!modal || !titleEl || !listEl) return;
+
+  const subset = appState.pairings.filter(p => (p.days || 0) === len);
+  titleEl.textContent = `${len}-Day Pairings — ${subset.length} trip${subset.length !== 1 ? 's' : ''}`;
+  listEl.innerHTML = '';
+
+  if (subset.length === 0) {
+    listEl.innerHTML = '<div style="color:var(--text-muted);font-family:var(--mono);font-size:12px;padding:20px;text-align:center;">No pairings found.</div>';
+    modal.style.display = 'flex';
+    return;
+  }
+
+  // Reuse exact same card construction as the Pairings view
+  function dayStartTime(depTime) {
+    const h = parseInt(depTime.slice(0,2),10), m = parseInt(depTime.slice(2,4),10);
+    let tot = h*60+m-60; if (tot < 0) tot += 1440;
+    return String(Math.floor(tot/60)).padStart(2,'0') + ':' + String(tot%60).padStart(2,'0');
+  }
+
+  for (const p of subset) {
+    const card = document.createElement('div');
+    card.className = 'trip-card';
+    card.style.cursor = 'pointer';
+
+    const days = p.operatingDays.join(' ') || '—';
+    const eff  = p.effectiveOnly
+      ? (p.effectiveStart || '—')
+      : (p.effectiveStart && p.effectiveEnd
+          ? `${p.effectiveStart}–${p.effectiveEnd}`
+          : p.effectiveStart || '—');
+    const cr   = p.creditHours > 0 ? decToHHMM(p.creditHours) : '—';
+    const tafb = p.tafbRaw || '—';
+    const pay  = p.payTL  > 0 ? decToHHMM(p.payTL)  : '—';
+    const blk  = p.blockHours > 0 ? decToHHMM(p.blockHours) : '—';
+    const ciTime   = p.checkIn ? p.checkIn.replace('.', ':') : '—';
+    const day0Legs = p.tripDays.length > 0 ? p.tripDays[0].legs.length : 0;
+    const dot = '<span style="color:var(--text-muted);margin:0 5px;">·</span>';
+    const sep = '<span style="color:var(--text-muted);">/</span>';
+
+    function legCountSpan2(tripDay, legCount) {
+      const alerts = [];
+      (tripDay?.legs || []).forEach(leg => {
+        if (leg.turn) { const t = parseFloat(leg.turn); if (t<1.0) alerts.push(`Turn ${leg.turn} (short)`); if (t>2.0) alerts.push(`Turn ${leg.turn} (long)`); }
+        if (leg.fdpMax) { const f = parseFloat(leg.fdpMax.split('/')[0]); if (!isNaN(f) && f>10) alerts.push(`FDP ${f} (>10)`); }
+      });
+      const tip = alerts.join(' | ');
+      return `<span style="${tip ? 'color:var(--amber);' : 'color:var(--text-muted);'}"${tip ? ` data-tip="${tip}" tabindex="0" onclick="event.stopPropagation()"` : ''}>${legCount}</span>`;
+    }
+
+    const layoverParts = [
+      `<span style="color:var(--text-muted);">CI</span> ${ciTime}${sep}${legCountSpan2(p.tripDays[0], day0Legs)}`
+    ];
+    for (let i = 0; i < p.tripDays.length; i++) {
+      const day = p.tripDays[i];
+      if (!day.layoverCity) continue;
+      const nextDay  = p.tripDays[i + 1];
+      const nextLegs = nextDay ? nextDay.legs.length : 0;
+      let startT = '—';
+      if (nextDay?.legs.length > 0 && nextDay.legs[0].depTime)
+        startT = dayStartTime(nextDay.legs[0].depTime);
+      const warn = day.arrLayoverMismatch
+        ? ` <span style="color:#f0c040;font-size:12px;cursor:default;" data-tip="Hotel city ≠ last arrival" tabindex="0" onclick="event.stopPropagation()">⌂</span>` : '';
+      layoverParts.push(`${day.layoverCity}${warn} ${startT}${sep}${legCountSpan2(nextDay, nextLegs)}`);
+    }
+    let coTime = '—';
+    const lastLeg = p.tripDays.at(-1)?.legs?.at(-1);
+    if (lastLeg?.arrTime) {
+      const h = parseInt(lastLeg.arrTime.slice(0,2),10), m = parseInt(lastLeg.arrTime.slice(2,4),10);
+      let tot = h*60+m+30; if (tot>=1440) tot-=1440;
+      coTime = String(Math.floor(tot/60)).padStart(2,'0') + ':' + String(tot%60).padStart(2,'0');
+    }
+    layoverParts.push(`<span style="color:var(--text-muted);">CO</span> ${coTime}`);
+    const layoverLine = layoverParts.join(dot);
+
+    const badges = [];
+    if (p.containsRedeye) badges.push(`<span style="color:#e05555;font-size:13px;cursor:default;" data-tip="Redeye leg" tabindex="0" onclick="event.stopPropagation()">◉</span>`);
+    if (p.containsDH)     badges.push(`<span style="color:var(--blue);font-size:10px;cursor:default;" data-tip="Deadhead leg" tabindex="0" onclick="event.stopPropagation()">DH</span>`);
+    const pBS = 'color:var(--green);font-family:var(--mono);font-size:10px;cursor:default;font-weight:600;';
+    if (p.sitPay   > 0) badges.push(`<span style="${pBS}" data-tip="SIT pay: ${decToHHMM(p.sitPay)}" tabindex="0" onclick="event.stopPropagation()">S</span>`);
+    if (p.edpPay   > 0) badges.push(`<span style="${pBS}" data-tip="Extended duty pay: ${p.edpPay.toFixed(2)}" tabindex="0" onclick="event.stopPropagation()">E</span>`);
+    if (p.holPay   > 0) badges.push(`<span style="${pBS}" data-tip="Holiday pay: ${p.holPay.toFixed(2)}" tabindex="0" onclick="event.stopPropagation()">H</span>`);
+    if (p.carvePay > 0) badges.push(`<span style="${pBS}" data-tip="Carve pay: ${p.carvePay.toFixed(2)}" tabindex="0" onclick="event.stopPropagation()">C</span>`);
+
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div style="min-width:0;line-height:1.3;">
+          <span style="font-family:var(--mono);font-size:14px;font-weight:700;color:var(--amber);">#${p.number}</span>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-left:8px;">${p.days}-day</span>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--text-secondary);margin-left:6px;">${days}</span>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-left:6px;">${eff}</span>
+          ${badges.length ? `<span style="margin-left:8px;display:inline-flex;gap:5px;">${badges.join('')}</span>` : ''}
+          <span class="occ-badge" style="font-family:var(--mono);font-size:10px;color:var(--text-muted);margin-left:6px;"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+          <button class="fav-btn" data-num="${p.number}"
+            title="${appState.favorites.has(p.number) ? 'Remove from favorites' : 'Mark as favorite'}"
+            style="background:none;border:none;cursor:pointer;font-size:16px;padding:2px 4px;line-height:1;
+                   color:${appState.favorites.has(p.number) ? 'var(--amber)' : 'var(--text-muted)'}">
+            ${appState.favorites.has(p.number) ? '★' : '☆'}
+          </button>
+          <div style="text-align:right;line-height:1.5;">
+            <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green);">${pay}</span>
+            <span style="font-family:var(--mono);font-size:10px;color:var(--green);margin-left:2px;">pay</span>
+            <span style="font-family:var(--mono);font-size:10px;color:var(--text-secondary);margin-left:8px;">${cr} cr</span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:5px;display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;">
+        <span style="color:var(--text-secondary);">${layoverLine}</span>
+        <span style="flex-shrink:0;">
+          <span style="color:var(--text-muted);">${blk} blk</span>
+          <span style="color:var(--text-muted);margin-left:8px;">TAFB ${tafb}</span>
+        </span>
+      </div>`;
+
+    const allOcc    = computeOccurrences(p);
+    const surviving = appState.survivingMap.get(p.number) || new Set(allOcc);
+    if (allOcc.length > 0 && surviving.size < allOcc.length) {
+      const occBadge = card.querySelector('.occ-badge');
+      if (occBadge) { occBadge.textContent = `${surviving.size}/${allOcc.length} occ`; occBadge.style.color = 'var(--amber)'; }
+    }
+    card.onclick = () => showPairingDetail(p, appState.survivingMap.get(p.number));
+    const favBtn = card.querySelector('.fav-btn');
+    if (favBtn) favBtn.onclick = (e) => toggleFavorite(p.number, e);
+    listEl.appendChild(card);
+  }
+
+  modal.style.display = 'flex';
+}
+
+function dashCloseLengthModal() {
+  const el = document.getElementById('dash-length-modal');
+  if (el) el.style.display = 'none';
+}
+
+// ─────────────────────────────────────────────────────────────
+// DASHBOARD
+// ─────────────────────────────────────────────────────────────
 async function refreshDashboard() {
   const pairings = appState.pairings;
   const count    = pairings.length;
@@ -9333,11 +10561,12 @@ async function refreshDashboard() {
     </div>`;
   }
 
-  function buildCard(title, stats, colorClass, pct) {
+  function buildCard(title, stats, colorClass, pct, clickLen) {
     const pctBadge = pct !== null
       ? `<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-left:6px;">(${pct}%)</span>`
       : '';
-    return `<div class="stat-card ${colorClass}" style="min-width:0;">
+    const tapAttr = clickLen != null ? `onclick="dashShowLengthModal(${clickLen})" style="min-width:0;cursor:pointer;"` : 'style="min-width:0;"';
+    return `<div class="stat-card ${colorClass}" ${tapAttr}>
       <div class="stat-label">${title}</div>
       <div style="font-family:var(--mono);font-size:24px;font-weight:700;
         color:var(--${colorClass||'text-primary'});line-height:1;margin-bottom:8px;">
@@ -9376,7 +10605,7 @@ async function refreshDashboard() {
       const pct    = Math.round(stats.count / count * 100);
       const label  = `${len}-Day Pairings`;
       const color  = colors[i % colors.length];
-      return buildCard(label, stats, color, pct);
+      return buildCard(label, stats, color, pct, len);
     }).join('');
   }
 
@@ -11165,8 +12394,108 @@ if (navigator.share && navigator.canShare) {
   }
 }
 init();
+
+// ── Global tooltip system ─────────────────────────────────────────────────────
+// Uses position:fixed on body so it is NEVER clipped by overflow:hidden/auto
+// containers (modal scroll areas, trip card wrappers, etc.).
+// Handles both mouse hover and touch tap via event delegation — no badge HTML changes needed.
+(function pbTooltip() {
+  let tipEl = null, hideTimer = null;
+
+  function el() {
+    if (!tipEl) {
+      tipEl = document.createElement('div');
+      tipEl.id = 'pb-tip';
+      tipEl.style.cssText = [
+        'position:fixed', 'z-index:9999', 'pointer-events:none',
+        'background:#1e2533', 'color:#e8eaf0',
+        'font-family:var(--mono)', 'font-size:11px', 'line-height:1.4',
+        'padding:5px 9px', 'border-radius:5px',
+        'border:1px solid rgba(255,255,255,0.12)',
+        'box-shadow:0 3px 12px rgba(0,0,0,0.45)',
+        'max-width:220px', 'white-space:normal', 'text-align:center',
+        'opacity:0', 'transition:opacity 0.12s ease', 'display:none'
+      ].join(';');
+      document.body.appendChild(tipEl);
+    }
+    return tipEl;
+  }
+
+  function show(target) {
+    const text = target.dataset.tip;
+    if (!text) return;
+    clearTimeout(hideTimer);
+    const t = el();
+    t.textContent = text;
+    t.style.display = 'block';
+    t.style.opacity = '0';
+    // Position after paint so offsetWidth is accurate
+    requestAnimationFrame(() => {
+      const r   = target.getBoundingClientRect();
+      const tw  = t.offsetWidth, th = t.offsetHeight;
+      let   lft = r.left + r.width / 2 - tw / 2;
+      let   top = r.top - th - 8;
+      // Flip below if too close to top of screen
+      if (top < 8) top = r.bottom + 8;
+      // Clamp to viewport horizontally
+      lft = Math.max(8, Math.min(lft, window.innerWidth - tw - 8));
+      t.style.left = lft + 'px';
+      t.style.top  = top + 'px';
+      t.style.opacity = '1';
+    });
+  }
+
+  function hide() {
+    if (tipEl) tipEl.style.opacity = '0';
+  }
+
+  // Touch / click — show tip, auto-hide after 2.5 s
+  document.addEventListener('click', e => {
+    const tgt = e.target.closest('[data-tip]');
+    if (tgt) {
+      show(tgt);
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(hide, 2500);
+    } else {
+      hide();
+    }
+  }, true);
+
+  // Mouse hover
+  document.addEventListener('mouseover', e => {
+    const tgt = e.target.closest('[data-tip]');
+    if (tgt) { clearTimeout(hideTimer); show(tgt); }
+  });
+  document.addEventListener('mouseout', e => {
+    const tgt = e.target.closest('[data-tip]');
+    if (tgt) { clearTimeout(hideTimer); hideTimer = setTimeout(hide, 120); }
+  });
+}());
 </script>
   <!-- Pairing Detail Modal -->
+  <!-- ═══ TRIP LENGTH DRILL-DOWN MODAL ═══ -->
+  <div id="dash-length-modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.78);
+    z-index:3000;align-items:center;justify-content:center;padding:12px;"
+    onclick="if(event.target===this)dashCloseLengthModal()">
+    <div style="background:var(--bg-panel);border:1px solid var(--border-bright);
+      border-radius:10px;width:100%;max-width:600px;max-height:88vh;
+      display:flex;flex-direction:column;overflow:hidden;
+      box-shadow:0 8px 32px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <span id="dash-length-modal-title"
+          style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--amber);"></span>
+        <button onclick="dashCloseLengthModal()"
+          style="background:none;border:none;color:var(--text-muted);
+          font-size:20px;cursor:pointer;padding:2px 6px;line-height:1;">✕</button>
+      </div>
+      <div id="dash-length-modal-list"
+        style="overflow-y:auto;flex:1;padding:10px 12px;display:flex;flex-direction:column;gap:8px;">
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ FILTER BUILDER MODAL ═══ -->
   <div id="filter-builder-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:3000;align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeFilterBuilder()">
     <div style="background:var(--bg-panel);border:1px solid var(--border-bright);border-radius:10px;width:340px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
@@ -11198,7 +12527,7 @@ init();
     </div>
   </div>
 
-  <div id="pairing-detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:2000;align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closePairingDetail()">
+  <div id="pairing-detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:3200;align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closePairingDetail()">
     <div style="background:var(--bg-panel);border:1px solid var(--border-bright);border-radius:10px;max-width:860px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--border);flex-shrink:0;">
         <span id="pairing-modal-title" style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--amber);"></span>
