@@ -2749,18 +2749,17 @@
 
           <div class="section-title" style="margin-bottom:6px;">Rotation — Schedule Import</div>
           <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:20px;line-height:1.6;">
-            Import via screenshot OCR, or paste raw text copied directly from CWA.
+            Import via screenshot OCR, or paste text copied directly from CWA.
             All processing runs entirely on-device — no data is uploaded or transmitted.
           </div>
 
           <!-- ── Method 1: Screenshot OCR ── -->
           <div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.12em;
-            text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">
-            Screenshot OCR
-          </div>
+            text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Screenshot OCR</div>
+          <!-- Image picker area -->
           <div id="rot-drop-zone"
             onclick="document.getElementById('rot-file-input').click()"
-            style="border:2px dashed var(--border);border-radius:10px;padding:28px 20px;
+            style="border:2px dashed var(--border);border-radius:10px;padding:26px 20px;
               text-align:center;cursor:pointer;transition:border-color 0.2s;margin-bottom:16px;
               background:var(--bg-card);"
             onmouseenter="this.style.borderColor='var(--amber-dim)'"
@@ -2784,21 +2783,17 @@
           <!-- ── Divider ── -->
           <div style="display:flex;align-items:center;gap:10px;margin:4px 0 16px;">
             <div style="flex:1;height:1px;background:var(--border);"></div>
-            <span style="font-family:var(--mono);font-size:9px;font-weight:600;
-              letter-spacing:.12em;text-transform:uppercase;color:var(--text-muted);">
-              or paste text
-            </span>
+            <span style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.12em;
+              text-transform:uppercase;color:var(--text-muted);">or paste text</span>
             <div style="flex:1;height:1px;background:var(--border);"></div>
           </div>
 
           <!-- ── Method 2: Paste raw text ── -->
           <div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.12em;
-            text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">
-            Paste from CWA
-          </div>
+            text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Paste from CWA</div>
           <div style="font-family:var(--mono);font-size:10px;color:var(--text-muted);
             margin-bottom:10px;line-height:1.6;">
-            In CWA: long-press anywhere → <strong style="color:var(--text-secondary);">Select All</strong>
+            In CWA: long-press → <strong style="color:var(--text-secondary);">Select All</strong>
             → <strong style="color:var(--text-secondary);">Copy</strong>, then paste below.
             Recommended for the light/print-style format.
           </div>
@@ -8397,7 +8392,10 @@ function ensureBidPeriod() {
 
 function getBidPeriodYearMonth() {
   if (appState.bidPeriodStart) {
-    const d = new Date(appState.bidPeriodStart);
+    // Parse ISO "YYYY-MM-DD" as local time — new Date(isoStr) treats it as UTC midnight
+    const s = appState.bidPeriodStart;
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const d = m ? new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3])) : new Date(s);
     if (!isNaN(d)) return { year: d.getFullYear(), month: d.getMonth() };
   }
   const MMAP = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
@@ -8537,16 +8535,29 @@ function computeOccurrences(p) {
   const MONTHS   = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
   const DAY_CODES = {MO:1,TU:2,WE:3,TH:4,FR:5,SA:6,SU:0};
 
+  // Year from bid period start; month from pairing's effective dates (may differ from bid period).
+  // This must stay in sync with renderPairingCalendar's month resolution.
+  // Parse ISO "YYYY-MM-DD" as LOCAL midnight (new Date(str) treats it as UTC → off-by-one in UTC-N).
+  function parseLocalDate(str) {
+    if (!str) return null;
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+    const d = new Date(str);
+    return isNaN(d) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
   let year = new Date().getFullYear(), month = null;
   if (appState.bidPeriodStart) {
-    const d = new Date(appState.bidPeriodStart);
-    if (!isNaN(d)) { year = d.getFullYear(); month = d.getMonth(); }
+    const d = parseLocalDate(appState.bidPeriodStart);
+    if (d) { year = d.getFullYear(); month = d.getMonth(); }
   }
   if (month === null && appState.bidMonth)
     month = MONTHS[appState.bidMonth.toUpperCase()];
-  if (month === null && p.effectiveStart) {
-    const m = p.effectiveStart.match(/([A-Z]{3})/i);
-    if (m && MONTHS[m[1].toUpperCase()] !== undefined) month = MONTHS[m[1].toUpperCase()];
+  // Override month with pairing's own effective month if available — bid period may start
+  // in a prior month (e.g. MAR bid period, APR-effective pairings).
+  if (p.effectiveStart) {
+    const em = p.effectiveStart.match(/([A-Z]{3})/i);
+    if (em && MONTHS[em[1].toUpperCase()] !== undefined)
+      month = MONTHS[em[1].toUpperCase()];
   }
   if (month === null) return [];
 
@@ -8674,6 +8685,29 @@ function applyOccurrenceFilters(startDays, p) {
         } else {
           if (!hasTargetLayover) surviving.delete(start);
         }
+      }
+    }
+    // ── Carry-out: occurrence extends beyond bid period end ───────
+    // An occurrence starting on `start` (day of effective month) is a carry-out
+    // if the trip's last calendar day falls after bpEnd.
+    if (f.type === 'pairing' && f.subtype === 'carry-out' && f.mode !== 'award') {
+      if (!appState.bidPeriodEnd || !bidInfo) continue;
+      const bpe = appState.bidPeriodEnd;
+      const bpm = bpe.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!bpm) continue;
+      const bpEndDate = new Date(parseInt(bpm[1]), parseInt(bpm[2])-1, parseInt(bpm[3]));
+      // Effective month for this pairing (start days are relative to effMon, not bidInfo.month)
+      const MMAP2 = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+      let effMon = bidInfo.month;
+      if (p.effectiveStart) {
+        const em = p.effectiveStart.match(/([A-Z]{3})/i);
+        if (em && MMAP2[em[1].toUpperCase()] !== undefined) effMon = MMAP2[em[1].toUpperCase()];
+      }
+      for (const start of [...surviving]) {
+        // Last calendar day of this occurrence = start + (tripLen - 1)
+        // JS Date constructor handles month overflow naturally (e.g. May 34 → June 3)
+        const lastDay = new Date(bidInfo.year, effMon, start + tripLen - 1);
+        if (lastDay > bpEndDate) surviving.delete(start);
       }
     }
   }
@@ -9329,6 +9363,7 @@ function fbSelectCategory(cat) {
         <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbShowLandingsIn()">Landings in airport</button>
         <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbShowDHFilter()">Contains deadhead</button>
         <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbShowPairingBool('has-redeye','redeye')">Contains redeye</button>
+        <button class="btn btn-ghost btn-sm" style="justify-content:flex-start;" onclick="fbApplyCarryOut()">🔁 Carry-out trips</button>
         ${back}
       </div>`;
   }
@@ -9782,6 +9817,17 @@ function fbApplyDHFilter() {
   });
 }
 
+// Carry-out: one-click filter, no params — immediately commits
+function fbApplyCarryOut() {
+  // Check if already active
+  if (appState.occurrenceFilters.some(f => f.type === 'pairing' && f.subtype === 'carry-out')) {
+    toast('Carry-out filter is already active', 'info');
+    closeFilterBuilder();
+    return;
+  }
+  fbCommitFilter({ type: 'pairing', subtype: 'carry-out', mode: 'avoid', params: {} });
+}
+
 function fbShowPairingBool(subtype, label) {
   document.getElementById('fb-title').textContent = 'Pairing — ' + label;
   const body = document.getElementById('fb-body');
@@ -10176,6 +10222,8 @@ function renderOccFilterList() {
       return `<span style="color:var(--text-muted);">Commutable:</span> ${parts.join(' & ')} ${modeTag}`;
     }
     if (f.type === 'pairing') {
+      if (f.subtype === 'carry-out')
+        return `<span style="color:var(--text-muted);">Carry-out:</span> ✗ avoid ${modeTag}`;
       const n = f.subtype.replace(/-/g,' ');
       let v = '';
       if (f.params.op === 'before') v = `< ${fmtFilterMins(f.params.mins)}`;
@@ -10247,53 +10295,85 @@ function removeOccFilter(id) {
 // PAIRING CALENDAR RENDERER
 // ─────────────────────────────────────────────────────────────
 function renderPairingCalendar(p, survivingDays) {
+  // ── Renders a calendar grid spanning the full bid period (Sun→Sat padded weeks).
+  // Days outside the bid period are shown dimmed. Uses actual Date objects throughout
+  // so month boundaries (e.g. MAR→APR, APR→MAY) are handled correctly.
   const el = document.getElementById('pairing-modal-calendar');
   if (!el) return;
 
-  const MONTHS  = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+  const MONTHS    = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
   const DAY_CODES = {MO:1,TU:2,WE:3,TH:4,FR:5,SA:6,SU:0};
+  const MONTH_NAMES = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const DOW_LABELS  = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+  const BAR_COLORS  = [
+    'rgba(255,176,32,0.85)',
+    'rgba(100,200,255,0.75)',
+    'rgba(120,220,120,0.75)',
+    'rgba(255,120,120,0.75)',
+    'rgba(200,150,255,0.75)',
+  ];
 
-  // ── Resolve bid period start date ─────────────────────────
-  let bpStart = null;
+  // ── parseLocalDate: parse ISO "YYYY-MM-DD" as LOCAL midnight ──
+  // new Date("2026-06-01") is UTC midnight → May 31 in UTC-4/5.
+  // new Date(2026, 5, 1) is local midnight → June 1 everywhere.
+  function parseLocalDate(str) {
+    if (!str) return null;
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+    const d = new Date(str); // fallback for non-ISO strings
+    return isNaN(d) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  // ── 1. Year (from bid period or current) ──────────────────────
+  let year = new Date().getFullYear();
   if (appState.bidPeriodStart) {
-    const d = new Date(appState.bidPeriodStart);
-    if (!isNaN(d)) bpStart = d;
+    const d = parseLocalDate(appState.bidPeriodStart);
+    if (d) year = d.getFullYear();
   }
-  if (!bpStart && appState.bidMonth) {
+
+  // ── 2. Pairing's effective month (must match computeOccurrences) ──
+  let effMonth = null;
+  if (appState.bidPeriodStart) {
+    const d = parseLocalDate(appState.bidPeriodStart);
+    if (d) effMonth = d.getMonth();
+  }
+  if (effMonth === null && appState.bidMonth) {
     const m = MONTHS[appState.bidMonth.toUpperCase()];
-    if (m !== undefined) bpStart = new Date(new Date().getFullYear(), m, 1);
+    if (m !== undefined) effMonth = m;
   }
-  if (!bpStart && p.effectiveStart) {
-    const mx = p.effectiveStart.match(/([A-Z]{3})\s*(\d{1,2})/i);
-    if (mx && MONTHS[mx[1].toUpperCase()] !== undefined)
-      bpStart = new Date(new Date().getFullYear(), MONTHS[mx[1].toUpperCase()], 1);
+  if (p.effectiveStart) {
+    const em = p.effectiveStart.match(/([A-Z]{3})/i);
+    if (em && MONTHS[em[1].toUpperCase()] !== undefined)
+      effMonth = MONTHS[em[1].toUpperCase()];
   }
-  if (!bpStart) { el.innerHTML = ''; return; }
+  if (effMonth === null) { el.innerHTML = ''; return; }
 
-  // ── Bid period end ─────────────────────────────────────────
-  let bpEnd = null;
-  if (appState.bidPeriodEnd) {
-    const d = new Date(appState.bidPeriodEnd);
-    if (!isNaN(d)) bpEnd = d;
-  }
-  const year  = bpStart.getFullYear();
-  const month = bpStart.getMonth();
-  // Calendar always shows the full month containing the bid period start
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstDow    = new Date(year, month, 1).getDay(); // 0=Sun
+  const daysInEffMonth = new Date(year, effMonth + 1, 0).getDate();
 
-  // ── Parse effective range ─────────────────────────────────
+  // ── 3. Bid period bounds (local midnight — no UTC shift) ──────
+  let bpStart = parseLocalDate(appState.bidPeriodStart);
+  let bpEnd   = parseLocalDate(appState.bidPeriodEnd);
+  if (!bpStart) bpStart = new Date(year, effMonth, 1);
+  if (!bpEnd)   bpEnd   = new Date(year, effMonth, daysInEffMonth);
+
+  // ── 4. Calendar grid: full Sun–Sat weeks containing bpStart and bpEnd ──
+  const calStart = new Date(bpStart);
+  calStart.setDate(calStart.getDate() - calStart.getDay());         // back to Sunday
+  const calEnd = new Date(bpEnd);
+  calEnd.setDate(calEnd.getDate() + (6 - calEnd.getDay()));         // forward to Saturday
+
+  // ── 5. Parse effective range (day-of-effMonth numbers) ────────
   function parseDayNum(str) {
     if (!str) return null;
     const m = str.match(/([A-Z]{3})?\s*(\d{1,2})/i);
     return m ? parseInt(m[2]) : null;
   }
-  const effStart = parseDayNum(p.effectiveStart) || 1;
-  const effEnd   = p.effectiveOnly ? effStart : (parseDayNum(p.effectiveEnd) || daysInMonth);
+  const effStart  = parseDayNum(p.effectiveStart) || 1;
+  const effEnd    = p.effectiveOnly ? effStart : (parseDayNum(p.effectiveEnd) || daysInEffMonth);
   const exceptSet = new Set((p.exceptDates||[]).map(e => parseDayNum(e)).filter(Boolean));
   const opDows    = new Set((p.operatingDays||[]).map(d => DAY_CODES[d]));
 
-  // ── CI / CO in minutes ────────────────────────────────────
+  // ── 6. CI / CO timing ─────────────────────────────────────────
   let ciMins = 0;
   if (p.checkIn) {
     const parts = p.checkIn.replace('.', ':').split(':');
@@ -10301,114 +10381,105 @@ function renderPairingCalendar(p, survivingDays) {
   }
   const tripDays  = Math.max(1, p.days || 1);
   const tafbMins  = p.tafbHours ? Math.round(p.tafbHours * 60) : tripDays * 1440;
-  const totalMins = ciMins + tafbMins; // minutes from midnight of start day to CO
+  const totalMins = ciMins + tafbMins;
 
-  // ── Collect occurrences ───────────────────────────────────
-  const occurrences = []; // { startDay (1-indexed) }
-  for (let d = effStart; d <= Math.min(effEnd, daysInMonth); d++) {
-    const dow = new Date(year, month, d).getDay();
+  // ── 7. Compute occurrences (day-of-effMonth, same as computeOccurrences) ──
+  const occurrences = [];
+  for (let d = effStart; d <= Math.min(effEnd, daysInEffMonth); d++) {
+    const dow = new Date(year, effMonth, d).getDay();
     if (opDows.size > 0 && !opDows.has(dow)) continue;
     if (exceptSet.has(d)) continue;
     occurrences.push(d);
   }
 
-  // ── Build a map: dayNum → list of bar segments for that day ──
-  // Each segment: { left: 0-1, width: 0-1, occIdx }
-  const dayBars = {}; // dayNum → [{left, width, occIdx}]
-  // Build survivingSet — default to all surviving if no filter info passed
+  // survivingSet: day-of-effMonth numbers that survive filters
   const survivingSet = survivingDays instanceof Set ? survivingDays : new Set(occurrences);
 
+  // ── 8. Build dayBars keyed by "YYYY-MM-DD" ────────────────────
+  function dateKey(dt) {
+    return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  }
+  const dayBars = {};
   occurrences.forEach((startDay, occIdx) => {
     const isAlive = survivingSet.has(startDay);
     for (let offset = 0; offset < tripDays + 1; offset++) {
-      const dayNum = startDay + offset;
-      if (dayNum < 1 || dayNum > daysInMonth) continue;
+      const dt = new Date(year, effMonth, startDay + offset);  // JS handles month overflow
       const dayStartMins = offset * 1440;
       if (dayStartMins >= totalMins) break;
       const barStart = Math.max(0, offset === 0 ? ciMins / 1440 : 0);
       const barEnd   = Math.min(1, (totalMins - dayStartMins) / 1440);
       if (barEnd <= barStart) continue;
-      if (!dayBars[dayNum]) dayBars[dayNum] = [];
-      dayBars[dayNum].push({ left: barStart, width: barEnd - barStart, occIdx, isAlive });
+      const key = dateKey(dt);
+      if (!dayBars[key]) dayBars[key] = [];
+      dayBars[key].push({ left: barStart, width: barEnd - barStart, occIdx, isAlive });
     }
   });
 
-  // ── Render ────────────────────────────────────────────────
-  const DOW_LABELS = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-  const MONTH_NAMES = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  // ── 9. Build effective-date lookup (YYYY-MM-DD → state) ───────
+  const effDates = new Set();
+  const exceptDates = new Set();
+  for (let d = effStart; d <= Math.min(effEnd, daysInEffMonth); d++) {
+    const key = dateKey(new Date(year, effMonth, d));
+    if (exceptSet.has(d)) exceptDates.add(key);
+    else effDates.add(key);
+  }
 
-  const bpEndStr = bpEnd
-    ? ` – ${MONTH_NAMES[bpEnd.getMonth()]} ${bpEnd.getDate()}, ${bpEnd.getFullYear()}`
-    : '';
-
+  // ── 10. Header ────────────────────────────────────────────────
+  const bpEndStr = ` – ${MONTH_NAMES[bpEnd.getMonth()]} ${bpEnd.getDate()}, ${bpEnd.getFullYear()}`;
   let html = `<div style="font-family:var(--mono);font-size:11px;user-select:none;">`;
   html += `<div style="color:var(--text-muted);margin-bottom:6px;font-size:10px;letter-spacing:.05em;">
-    ${MONTH_NAMES[month]} ${year}${bpEndStr}
+    ${MONTH_NAMES[bpStart.getMonth()]} ${bpStart.getFullYear()}${bpEndStr}
   </div>`;
 
-  // Header row
+  // DOW header row
   html += `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:2px;">`;
   for (const d of DOW_LABELS)
     html += `<div style="text-align:center;color:var(--text-muted);font-size:10px;padding:1px 0;">${d}</div>`;
   html += `</div>`;
 
-  // Day cells
-  const totalCells = firstDow + daysInMonth;
-  const rows = Math.ceil(totalCells / 7);
-  const BAR_COLORS = [
-    'rgba(255,176,32,0.85)',   // amber
-    'rgba(100,200,255,0.75)',  // blue
-    'rgba(120,220,120,0.75)',  // green
-    'rgba(255,120,120,0.75)',  // red
-    'rgba(200,150,255,0.75)',  // purple
-  ];
-
+  // ── 11. Day cells ─────────────────────────────────────────────
+  const BAR_H = 4, BAR_GAP = 1;
   html += `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">`;
-  for (let cell = 0; cell < rows * 7; cell++) {
-    const dayNum  = cell - firstDow + 1;
-    const inMonth = dayNum >= 1 && dayNum <= daysInMonth;
-    const segments = inMonth ? (dayBars[dayNum] || []) : [];
-    const hasBar   = segments.length > 0;
 
-    // Background tint
-    let bgColor = 'transparent';
-    let borderColor = 'transparent';
-    let textColor = 'transparent';
-    if (inMonth) {
-      borderColor = 'var(--border)';
-      textColor   = 'var(--text-muted)';
-      if (dayNum >= effStart && dayNum <= effEnd && !exceptSet.has(dayNum))
-        bgColor = 'rgba(255,176,32,0.05)';
-      if (exceptSet.has(dayNum))
-        bgColor = 'rgba(224,85,85,0.1)';
+  const cur = new Date(calStart);
+  while (cur <= calEnd) {
+    const key        = dateKey(cur);
+    const dayNum     = cur.getDate();
+    const inBidPeriod = cur >= bpStart && cur <= bpEnd;
+
+    const segments = dayBars[key] || [];   // bars visible on ALL grid cells (incl. overflow)
+    const cellH    = Math.max(28, segments.length * (BAR_H + BAR_GAP) + 14);
+
+    let bgColor     = 'transparent';
+    let borderColor = 'var(--border)';
+    let textColor   = inBidPeriod ? 'var(--text-muted)' : 'var(--text-muted)';
+    let opacity     = inBidPeriod ? '1' : '0.3';
+
+    if (inBidPeriod) {
+      if (effDates.has(key))   bgColor = 'rgba(255,176,32,0.05)';
+      if (exceptDates.has(key)) bgColor = 'rgba(224,85,85,0.1)';
     }
-
-    // Each bar segment is a thin horizontal strip at a proportional position
-    // Bars for the same day stack vertically (each ~4px tall, spaced 1px)
-    const BAR_H = 4; // px per bar
-    const BAR_GAP = 1;
-    const cellH = Math.max(28, segments.length * (BAR_H + BAR_GAP) + 14);
 
     let barsHtml = '';
     segments.forEach((seg, si) => {
-      const color = seg.isAlive
-        ? BAR_COLORS[seg.occIdx % BAR_COLORS.length]
-        : 'rgba(120,120,120,0.3)';
-      const leftPct  = (seg.left * 100).toFixed(1);
+      const color    = seg.isAlive ? BAR_COLORS[seg.occIdx % BAR_COLORS.length] : 'rgba(120,120,120,0.3)';
+      const leftPct  = (seg.left  * 100).toFixed(1);
       const widthPct = (seg.width * 100).toFixed(1);
-      const top = 14 + si * (BAR_H + BAR_GAP); // below the day number
+      const top      = 14 + si * (BAR_H + BAR_GAP);
       barsHtml += `<div style="position:absolute;top:${top}px;left:${leftPct}%;width:${widthPct}%;height:${BAR_H}px;background:${color};border-radius:2px;"></div>`;
     });
 
     html += `<div style="position:relative;background:${bgColor};border:1px solid ${borderColor};
-      border-radius:3px;height:${cellH}px;overflow:hidden;min-width:0;">
-      <span style="position:absolute;top:2px;left:0;right:0;text-align:center;font-size:10px;color:${textColor};line-height:1;">${inMonth ? dayNum : ''}</span>
+      border-radius:3px;height:${cellH}px;overflow:hidden;min-width:0;opacity:${opacity};">
+      <span style="position:absolute;top:2px;left:0;right:0;text-align:center;font-size:10px;color:${textColor};line-height:1;">${dayNum}</span>
       ${barsHtml}
     </div>`;
+
+    cur.setDate(cur.getDate() + 1);
   }
   html += `</div>`;
 
-  // Legend
+  // ── 12. Legend ────────────────────────────────────────────────
   if (occurrences.length > 0) {
     const ciH = String(Math.floor(ciMins/60)).padStart(2,'0');
     const ciM = String(ciMins%60).padStart(2,'0');
@@ -10425,6 +10496,7 @@ function renderPairingCalendar(p, survivingDays) {
   html += `</div>`;
   el.innerHTML = html;
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // DASHBOARD
@@ -11578,72 +11650,6 @@ function rotCopyText() {
     });
 }
 
-// ── Image pre-processor ──────────────────────────────────────────────────────
-// Converts any screenshot to high-contrast dark-text-on-white before Tesseract.
-// Steps: scale up (if small) → grayscale → histogram stretch → invert dark-bg.
-// Tesseract accuracy is dramatically better on normalised B&W input.
-// On any error the original file is returned unchanged as a safe fallback.
-async function rotPreprocessImage(file) {
-  return new Promise(resolve => {
-    const img = new Image();
-    const objUrl = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(objUrl);
-      try {
-        const W = img.naturalWidth, H = img.naturalHeight;
-        // Scale up to ~1800px wide if image is small; Tesseract is most accurate
-        // at ~300 DPI equivalent — mobile screenshots are often 1080px.
-        const scale = W < 1800 ? Math.min(2.0, 1800 / W) : 1.0;
-        const cW = Math.round(W * scale), cH = Math.round(H * scale);
-
-        const canvas = document.createElement('canvas');
-        canvas.width = cW; canvas.height = cH;
-        const ctx = canvas.getContext('2d');
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, 0, cW, cH);
-
-        const id  = ctx.getImageData(0, 0, cW, cH);
-        const d   = id.data;
-        const pxN = d.length >> 2;
-
-        // ── Grayscale ──────────────────────────────────────────
-        const gray = new Uint8Array(pxN);
-        for (let i = 0, p = 0; i < d.length; i += 4, p++)
-          gray[p] = (0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]) | 0;
-
-        // ── Histogram: compute mean + 2%/98% percentiles ───────
-        const hist = new Uint32Array(256);
-        let gsum = 0;
-        for (let p = 0; p < pxN; p++) { hist[gray[p]]++; gsum += gray[p]; }
-        const gmean   = gsum / pxN;
-        const isLightBg = gmean > 128; // light bg = mostly bright pixels
-
-        let loV = 0, hiV = 255, cum = 0;
-        const cut2 = pxN * 0.02, cut98 = pxN * 0.98;
-        for (let v = 0;   v < 256; v++) { cum += hist[v]; if (cum >= cut2)          { loV = v; break; } }
-        cum = 0;
-        for (let v = 255; v >= 0;  v--) { cum += hist[v]; if (cum >= (pxN - cut98)) { hiV = v; break; } }
-        const span = Math.max(hiV - loV, 1);
-
-        // ── Stretch contrast + normalise polarity ──────────────
-        // Output is always dark-text-on-white, which Tesseract prefers.
-        for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-          let v = Math.max(0, Math.min(255, Math.round(((gray[p] - loV) / span) * 255)));
-          if (!isLightBg) v = 255 - v; // invert dark-background screenshots
-          d[i] = d[i+1] = d[i+2] = v;
-          d[i+3] = 255;
-        }
-
-        ctx.putImageData(id, 0, 0);
-        canvas.toBlob(blob => resolve(blob || file), 'image/png');
-      } catch (_) { resolve(file); }
-    };
-    img.onerror = () => { URL.revokeObjectURL(objUrl); resolve(file); };
-    img.src = objUrl;
-  });
-}
-
 async function rotHandleFile(input) {
   const file = input.files[0];
   if (!file) return;
@@ -11654,10 +11660,10 @@ async function rotHandleFile(input) {
   rotEl('rot-error').style.display         = 'none';
   rotEl('rot-output-text').textContent     = '';
 
-  // Show original image preview
+  // Show image preview
   const url = URL.createObjectURL(file);
-  rotEl('rot-preview-img').src = url;
-  rotEl('rot-preview-wrap').style.display  = 'block';
+  rotEl('rot-preview-img').src  = url;
+  rotEl('rot-preview-wrap').style.display = 'block';
 
   // Show progress
   rotEl('rot-progress-wrap').style.display = 'block';
@@ -11665,68 +11671,41 @@ async function rotHandleFile(input) {
   rotEl('rot-pct').textContent    = '0%';
   rotEl('rot-bar').style.width    = '0%';
 
-  // Load Tesseract
-  try { await rotLoadTesseract(); }
-  catch(e) { rotShowError(e.message); return; }
-
-  // Pre-process: scale + grayscale + histogram stretch + invert if dark-bg
-  rotEl('rot-status').textContent = 'Enhancing image…';
-  let ocrBlob;
-  try { ocrBlob = await rotPreprocessImage(file); }
-  catch(_) { ocrBlob = file; }
+  // Load Tesseract if needed
+  try {
+    await rotLoadTesseract();
+  } catch(e) {
+    rotShowError(e.message); return;
+  }
 
   rotEl('rot-status').textContent = 'Recognising text…';
 
-  const logFn = m => {
-    if (m.status === 'recognizing text') {
-      const pct = Math.round((m.progress || 0) * 100);
-      rotEl('rot-pct').textContent = pct + '%';
-      rotEl('rot-bar').style.width = pct + '%';
-      rotEl('rot-status').textContent = 'Recognising text…';
-    } else if (m.status === 'loading language traineddata') {
-      rotEl('rot-status').textContent = 'Downloading language data (one-time, ~4MB)…';
-    } else if (m.status === 'initializing api') {
-      rotEl('rot-status').textContent = 'Initialising OCR engine…';
-    }
-  };
-
   try {
-    let result;
-    // createWorker lets us set PSM 6 (uniform block) — far better than the
-    // default PSM 3 auto-layout for structured aviation documents.
-    // Falls back to simple recognize() if createWorker is unavailable.
-    let worker;
-    try {
-      worker = await Tesseract.createWorker('eng', 1, { logger: logFn });
-      try {
-        await worker.setParameters({
-          tessedit_pageseg_mode: '6',     // assume single uniform text block
-          preserve_interword_spaces: '1', // keep column spacing intact
-        });
-      } catch(_) {/* older Tesseract.js — params not critical */}
-      result = await worker.recognize(ocrBlob);
-      await worker.terminate();
-    } catch(workerErr) {
-      if (worker) try { await worker.terminate(); } catch(_) {}
-      // Fallback: simple API, still uses preprocessed blob
-      result = await Tesseract.recognize(ocrBlob, 'eng', { logger: logFn });
-    }
+    const result = await Tesseract.recognize(file, 'eng', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          const pct = Math.round((m.progress || 0) * 100);
+          rotEl('rot-pct').textContent = pct + '%';
+          rotEl('rot-bar').style.width = pct + '%';
+          rotEl('rot-status').textContent = 'Recognising text…';
+        } else if (m.status === 'loading language traineddata') {
+          rotEl('rot-status').textContent = 'Downloading language data (one-time, ~4MB)…';
+        } else if (m.status === 'initializing api') {
+          rotEl('rot-status').textContent = 'Initialising OCR engine…';
+        }
+      }
+    });
 
     const text = (result.data.text || '').trim();
     rotEl('rot-progress-wrap').style.display = 'none';
     rotEl('rot-output-text').textContent = text || '(No text detected)';
     rotEl('rot-output-wrap').style.display = 'block';
-
-    // Mirror original preview into the raw pane
+    // Mirror preview image into the raw pane
     const pw2 = rotEl('rot-preview-wrap-2');
-    if (pw2) {
-      pw2.innerHTML = '';
-      const img2 = document.createElement('img');
-      img2.src = url;
-      img2.style.cssText = 'max-width:100%;border-radius:8px;border:1px solid var(--border);display:block;margin-bottom:6px;';
-      pw2.appendChild(img2);
-    }
-
+    if (pw2) { pw2.innerHTML = ''; const img2 = document.createElement('img');
+      img2.src = url; img2.style.cssText = 'max-width:100%;border-radius:8px;border:1px solid var(--border);display:block;margin-bottom:6px;';
+      pw2.appendChild(img2); }
+    // Always land on raw view after OCR
     _rotView = 'raw';
     rotSetView('raw');
 
@@ -11741,7 +11720,7 @@ async function rotHandleFile(input) {
 // PASTE PATH
 // ─────────────────────────────────────────────────────────────
 
-// Called by the onpaste event (after a 60ms delay so textarea has content)
+// Auto-fires 60 ms after paste event so textarea has content
 function rotAutoPaste() {
   const ta = rotEl('rot-paste-input');
   if (ta && ta.value.trim()) rotHandlePaste();
@@ -11760,21 +11739,14 @@ function rotHandlePaste() {
     }, 1800);
     return;
   }
-
-  // Populate the shared output pre element
   rotEl('rot-output-text').textContent = text;
   rotEl('rot-progress-wrap').style.display = 'none';
   rotEl('rot-error').style.display         = 'none';
   rotEl('rot-output-wrap').style.display   = 'block';
-
-  // No image preview for paste path
   const pw2 = rotEl('rot-preview-wrap-2');
   if (pw2) pw2.innerHTML = '';
-
-  // Clear the textarea
   ta.value = '';
-
-  // Go straight to parsed view (text is clean, no need to review raw first)
+  // Go straight to parsed — pasted text is clean, skip raw review
   _rotView = 'raw';
   rotSetView('parsed');
 }
@@ -11822,43 +11794,36 @@ function rotParseText(raw) {
   const MMAP  = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
   const MNAMES= ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 
-  // ── 1. Header (first 20 lines) ─────────────────────────────
-  // Uses htrim (trimmed) for ^ anchored patterns — light-format OCR often adds
-  // leading whitespace that breaks ^ on raw lines.
-  for (const line of lines.slice(0, 20)) {
-    const htrim = line.trim();
-    if (!htrim) continue;
-
-    // base+equipment: "NYC  PILOT 73N" — use htrim so leading spaces don't break ^
-    // Also handles OCR garbles: PIL0T, PLLOT, etc.
-    const hm = htrim.match(/^([A-Z]{3})\s+P[I1][L1][O0]T\s+(\S+)/i);
+  // ── 1. Header (first 12 lines) ─────────────────────────────
+  for (const line of lines.slice(0, 12)) {
+    // base+equipment: "NYC  PILOT 73N" — OCR may garble PILOT as PIL0T, PLLOT etc.
+    const hm = line.match(/^([A-Z]{3})\s+P[I1][L1][O0]T\s+(\S+)/i);
     if (hm) { r.base=hm[1]; r.equipment=hm[2]; }
 
-    // pairingNum+position: "0799  POS-A" — broaden sep to include colon, period, underscore
-    const pm = htrim.match(/([A-Z]{0,2}\s*\d{3,5})\s+P[O0]S[-–—=:._\s]([AB]{1,2})\b/);
+    // pairingNum+position: "0799  POS-A" — OCR may replace hyphen with space, dash, equals
+    const pm = line.match(/([A-Z]{0,2}\s*\d{3,5})\s+POS[-–—=\s]([AB]{1,2})\b/);
     if (pm) { r.pairingNum=pm[1].replace(/\s/g,''); r.position=pm[2]; }
 
     // EFFECTIVE date — allow optional space between month and day: "APR08" or "APR 08"
-    const em = htrim.match(/EFFECTIVE\s+([A-Z]{3})\s*(\d{1,2})/i);
+    const em = line.match(/EFFECTIVE\s+([A-Z]{3})\s*(\d{1,2})/i);
     if (em) r.effectiveDate = em[1].toUpperCase() + em[2].padStart(2,'0');
 
-    const ci = htrim.match(/CHECK\s+IN\s+AT\s+([\d.]+)/i);
+    const ci = line.match(/CHECK\s+IN\s+AT\s+([\d.]+)/i);
     if (ci) r.reportTime = hhmm(ci[1]);
 
     // "ACTUAL REPORT TIME 1200" (no slash = Day 1 check-in time)
-    const rt = htrim.match(/ACTUAL\s+REPORT\s+TIME\s+(\d{3,4})\s*$/i);
+    const rt = line.match(/ACTUAL\s+REPORT\s+TIME\s+(\d{3,4})\s*$/i);
     if (rt) r.reportTime = hhmm(rt[1]);
 
-    const pn = htrim.match(/[A-Z]\s+\d{7}\s+([A-Z]+[,.]\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/);
+    const pn = line.match(/[A-Z]\s+\d{7}\s+([A-Z]+[,.]\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/);
     if (pn) r.pilotName = pn[1];
   }
 
   // ── 2. Leg core detector ───────────────────────────────────
-  // Requires: CITY [sep] TIME  CITY [sep] TIME
-  // Block time is OPTIONAL: light-format OCR (thinner font) often drops the period,
-  // producing "104" instead of "1.04" which broke the old hard require.
-  // Comma decimal ("1,04") also accepted. Block falls back to null if not found.
-  const LEG_CORE = /([A-Z][A-Z0-9]{2})[\s.]?(\d{4})\s*([A-Z][A-Z0-9]{2})[\s.]?(\d{4})(?:[^.,\n]*?(\d+[.,]\d+))?/;
+  // Requires: CITY [sep] TIME  CITY [sep] TIME  block(d.dd)
+  // sep = space or period (OCR artifact); made optional (?) to handle photo OCR
+  // merging city+time like "LGA1317" without separator
+  const LEG_CORE = /([A-Z][A-Z0-9]{2})[\s.]?(\d{4})\s*([A-Z][A-Z0-9]{2})[\s.]?(\d{4})[^.]*?(\d+\.\d+)/;
 
 
   let curDay  = null;
@@ -11908,7 +11873,7 @@ function rotParseText(raw) {
     // ── Totals ────────────────────────────────────────────
     // REGULAR- line is authoritative for trip totals.
     // Per-day subtotals (e.g. '8.58TL') appear earlier and must not be used.
-    if (/^REGULAR[\s-]/i.test(trim)) {
+    if (/^REGULAR-/i.test(trim)) {
       [trim, (lines[i+1]||'').trim(), (lines[i+2]||'').trim()].forEach(ln => {
         const pairs = [
           ['tl','TL'],['tbl','TBL'],['tdhd','TDHD'],['tbmu','TBMU'],
@@ -11941,8 +11906,7 @@ function rotParseText(raw) {
 
     const dep = cm[1], depT = cm[2];
     const arr = cm[3], arrT = cm[4];
-    // cm[5] is optional (block time) — normalize comma decimal before parsing
-    const block = cm[5] ? hhmm(cm[5].replace(',', '.')) : null;
+    const block = hhmm(cm[5]);
     const coreIdx = cm.index;
 
     // Everything before the core = prefix
