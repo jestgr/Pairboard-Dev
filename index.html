@@ -1124,10 +1124,12 @@
   /* ── Toast ───────────────────────────────────────────────── */
   #toast-container {
     position: fixed;
-    bottom: 20px; right: 20px;
+    top: 20px; left: 50%;
+    transform: translateX(-50%);
     z-index: 2000;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 8px;
     pointer-events: none;
   }
@@ -1209,9 +1211,15 @@
   }
   .cal-cell.bid-period { background: rgba(91,155,213,0.06); }
   .cal-cell.heat-1  { background: rgba(245,176,48,0.08); }
-  .cal-cell.heat-2  { background: rgba(245,176,48,0.16); }
-  .cal-cell.heat-3  { background: rgba(245,176,48,0.26); }
-  .cal-cell.heat-4  { background: rgba(245,176,48,0.38); }
+  .cal-cell.heat-2  { background: rgba(245,176,48,0.15); }
+  .cal-cell.heat-3  { background: rgba(245,176,48,0.22); }
+  .cal-cell.heat-4  { background: rgba(245,176,48,0.29); }
+  .cal-cell.heat-5  { background: rgba(245,176,48,0.36); }
+  .cal-cell.heat-6  { background: rgba(245,176,48,0.45); }
+  .cal-cell.heat-7  { background: rgba(245,176,48,0.55); }
+  .cal-cell.heat-8  { background: rgba(245,176,48,0.68); }
+  .cal-cell.heat-9  { background: rgba(245,176,48,0.82); }
+  .cal-cell.heat-10 { background: rgba(245,176,48,1.00); }
   .cal-heat-count {
     font-family: var(--mono); font-size: 10px;
     color: var(--amber); font-weight: 600; margin-top: 2px;
@@ -1519,8 +1527,11 @@
           <!-- Total card always visible -->
           <div id="dash-total-card" style="margin-bottom:16px;"></div>
           <!-- Per-length cards rendered dynamically -->
-          <div class="section-title" id="dash-by-length-title" style="display:none;margin-top:4px;">By Trip Length</div>
-          <div class="stats-grid" id="dash-by-length"></div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+            <div class="section-title" id="dash-by-length-title" style="display:none;margin-bottom:0;">By Trip Length</div>
+            <button class="btn btn-primary btn-sm" onclick="openImportModal()" style="margin-left: auto;">Import PDF</button>
+          </div>
+          <div class="stats-grid" id="dash-by-length" style="margin-top:12px;"></div>
           <!-- Bid period info -->
           <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-top:8px;" id="stat-period-line">—</div>
           <!-- Keep legacy IDs for anything that might still reference them -->
@@ -1544,6 +1555,7 @@
           <div class="trips-layout">
 
             <!-- ── Search + Filter bar ── -->
+            <div style="display:flex; flex-direction:column;">
             <div class="trips-search-filter-bar" id="trips-sf-bar">
               <!-- Search (left half) -->
               <div class="tsf-search">
@@ -1585,11 +1597,15 @@
                 </div>
               </div>
             </div>
+            <!-- Active filter chips -->
+            <div id="active-filter-chips" style="display:flex; flex-wrap:wrap; gap:6px; padding:8px 12px 0;"></div>
+            </div>
 
             <!-- ── Trip list ── -->
             <div class="trips-main" style="padding:8px 12px 12px;overflow:hidden;display:flex;flex-direction:column;gap:10px;">
               <div class="trips-toolbar">
                 <span class="trips-count" id="trips-count">— pairings</span>
+                <button class="btn btn-primary btn-sm" onclick="openImportModal()">Import PDF</button>
                 <button id="fav-filter-btn" onclick="toggleFavFilter()"
                   style="font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:20px;
                   cursor:pointer;border:1px solid var(--border);background:transparent;
@@ -6677,6 +6693,171 @@ function clearFilters() {
   saveFiltersToDb();
 }
 
+// ── Active Filter Chips (Drag & Drop Reorder) ────────────────
+let _draggedFilterId = null;
+
+function renderActiveFilterChips() {
+  const container = document.getElementById('active-filter-chips');
+  if (!container) return;
+
+  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  let month = new Date().getMonth();
+  const MMAP = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+  if (appState.bidPeriodStart) { const d = new Date(appState.bidPeriodStart); if (!isNaN(d)) month = d.getMonth(); }
+  else if (appState.bidMonth) month = MMAP[appState.bidMonth.toUpperCase()] ?? month;
+  const MON = MONTHS[month];
+
+  function shortLabel(f) {
+    if (f.type === 'request-off' && f.subtype === 'by-dates') {
+      return `Off: ${f.params.days.length} days`;
+    }
+    if (f.type === 'pairing-length') {
+      const sym = { lt:'<', exact:'=', gt:'>' };
+      if (sym[f.subtype]) return `Len ${sym[f.subtype]} ${f.params.value}d`;
+      if (f.subtype === 'min')   return `Len ≥ ${f.params.min}d`;
+      if (f.subtype === 'max')   return `Len ≤ ${f.params.max}d`;
+      if (f.subtype === 'range') return `Len ${f.params.min}-${f.params.max}d`;
+    }
+    if (f.type === 'credit') {
+      if (f.subtype === 'min')   return `Cr ≥ ${f.params.min}h`;
+      if (f.subtype === 'max')   return `Cr ≤ ${f.params.max}h`;
+      if (f.subtype === 'range') return `Cr ${f.params.min}-${f.params.max}h`;
+    }
+    if (f.type === 'layovers-in') {
+      const icon = f.subtype === 'prefer' ? '✓' : '✗';
+      return `Lay ${icon} ${f.params.cities.join(',')}`;
+    }
+    if (f.type === 'landings-in') {
+      const icon = f.mode === 'award' ? '✓' : '✗';
+      return `Land ${icon} ${f.params.stations.join(',')}`;
+    }
+    const modeTag = f.mode === 'avoid' ? '✗' : '✓';
+    if (f.type === 'prefer-off') {
+      if (f.subtype === 'days-of-week') return `Off: ${f.params.days.join(',')}`;
+      if (f.subtype === 'date-range') return `Off: ${f.params.from}-${f.params.to}`;
+      if (f.subtype === 'weekends') return `Off: Wknd`;
+    }
+    if (f.type === 'commutable') return `Commutable`;
+    if (f.type === 'pairing') {
+      if (f.subtype === 'carry-out') return `No Carry-out`;
+      return `${f.subtype.split('-')[0]} ${modeTag}`;
+    }
+    if (f.type === 'layover') {
+      if (f.subtype === 'station') return `Lay ${f.params.op === 'exclude' ? '✗' : '✓'} ${f.params.stations[0]}${f.params.stations.length>1?'+':''}`;
+      return `Lay ${f.subtype}`;
+    }
+    return f.type;
+  }
+
+  container.innerHTML = appState.occurrenceFilters.map((f, i) => `
+    <div class="active-filter-chip" data-index="${i}" data-id="${f.id}"
+         draggable="true"
+         ondragstart="filterDragStart(event, ${f.id})"
+         ondragover="filterDragOver(event)"
+         ondrop="filterDrop(event, ${i})"
+         ontouchstart="filterTouchStart(event, ${f.id})"
+         ontouchmove="filterTouchMove(event)"
+         ontouchend="filterTouchEnd(event)"
+         style="display:flex; align-items:center; gap:6px; background:var(--amber-glow);
+                border:1px solid var(--amber-dim); border-radius:20px;
+                padding:4px 10px; font-family:var(--mono); font-size:10px;
+                color:var(--amber); cursor:grab; user-select:none; touch-action:none;">
+      <span title="Drag to reorder">⋮⋮</span>
+      <span>${shortLabel(f)}</span>
+      <button onclick="removeOccFilter(${f.id})"
+              style="background:none; border:none; color:var(--amber);
+                     font-size:12px; cursor:pointer; padding:0 2px; line-height:1;">✕</button>
+    </div>
+  `).join('');
+}
+
+// Touch support for reordering filters on mobile devices
+let _touchDragEl = null;
+let _touchDragId = null;
+let _touchClone = null;
+
+function filterTouchStart(e, id) {
+  _touchDragId = id;
+  _touchDragEl = e.currentTarget;
+  const rect = _touchDragEl.getBoundingClientRect();
+  _touchClone = _touchDragEl.cloneNode(true);
+  _touchClone.style.position = 'fixed';
+  _touchClone.style.left = rect.left + 'px';
+  _touchClone.style.top = rect.top + 'px';
+  _touchClone.style.opacity = '0.8';
+  _touchClone.style.pointerEvents = 'none';
+  _touchClone.style.zIndex = '9999';
+  document.body.appendChild(_touchClone);
+  _touchDragEl.style.opacity = '0.3';
+}
+
+function filterTouchMove(e) {
+  if (!_touchClone) return;
+  e.preventDefault(); // prevent scrolling while dragging
+  const touch = e.touches[0];
+  _touchClone.style.left = (touch.clientX - _touchClone.offsetWidth / 2) + 'px';
+  _touchClone.style.top = (touch.clientY - _touchClone.offsetHeight / 2) + 'px';
+}
+
+function filterTouchEnd(e) {
+  if (!_touchDragId || !_touchClone) return;
+  const touch = e.changedTouches[0];
+  _touchClone.remove();
+  _touchClone = null;
+  _touchDragEl.style.opacity = '1';
+
+  // find drop target
+  const dropTarget = document.elementFromPoint(touch.clientX, touch.clientY);
+  const targetChip = dropTarget ? dropTarget.closest('.active-filter-chip') : null;
+
+  if (targetChip && targetChip !== _touchDragEl) {
+    const targetIndex = parseInt(targetChip.getAttribute('data-index'), 10);
+    const sourceIndex = appState.occurrenceFilters.findIndex(f => f.id === _touchDragId);
+    if (sourceIndex !== -1 && sourceIndex !== targetIndex) {
+      const [removed] = appState.occurrenceFilters.splice(sourceIndex, 1);
+      appState.occurrenceFilters.splice(targetIndex, 0, removed);
+      saveFiltersToDb();
+      renderOccFilterList();
+      applyFilters();
+    }
+  }
+  _touchDragId = null;
+  _touchDragEl = null;
+}
+
+function filterDragStart(e, id) {
+  _draggedFilterId = id;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', id); // needed for Firefox
+  e.target.style.opacity = '0.5';
+}
+
+function filterDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function filterDrop(e, targetIndex) {
+  e.preventDefault();
+  if (_draggedFilterId === null) return;
+
+  const sourceIndex = appState.occurrenceFilters.findIndex(f => f.id === _draggedFilterId);
+  if (sourceIndex === -1 || sourceIndex === targetIndex) {
+    _draggedFilterId = null;
+    renderActiveFilterChips();
+    return;
+  }
+
+  // Reorder array
+  const [removed] = appState.occurrenceFilters.splice(sourceIndex, 1);
+  appState.occurrenceFilters.splice(targetIndex, 0, removed);
+
+  _draggedFilterId = null;
+  saveFiltersToDb();
+  renderOccFilterList();
+  applyFilters(); // will call renderActiveFilterChips
+}
+
 // ─────────────────────────────────────────────────────────────
 // FAR 117 CALCULATOR — shared helpers + tab switching
 // ─────────────────────────────────────────────────────────────
@@ -8903,6 +9084,7 @@ function applyFilters() {
 
   appState.filteredPairings = result;
   renderTripList();
+  renderActiveFilterChips();
   // Refresh calendar heat map if it's currently visible
   if (document.getElementById('view-calendar')?.classList.contains('active')) {
     renderCalendar();
@@ -11039,10 +11221,15 @@ function renderCalendar() {
 
   // ── Percentile-based heat scaling for granularity ────────
   const counts = [...dayCountMap.values()].filter(c => c > 0).sort((a,b) => a-b);
+  const p10 = counts[Math.floor(counts.length * 0.10)] || 0;
   const p20 = counts[Math.floor(counts.length * 0.20)] || 0;
+  const p30 = counts[Math.floor(counts.length * 0.30)] || 0;
   const p40 = counts[Math.floor(counts.length * 0.40)] || 0;
+  const p50 = counts[Math.floor(counts.length * 0.50)] || 0;
   const p60 = counts[Math.floor(counts.length * 0.60)] || 0;
+  const p70 = counts[Math.floor(counts.length * 0.70)] || 0;
   const p80 = counts[Math.floor(counts.length * 0.80)] || 0;
+  const p90 = counts[Math.floor(counts.length * 0.90)] || 0;
 
   const grid = document.getElementById('cal-grid');
   grid.innerHTML = '';
@@ -11097,10 +11284,15 @@ function renderCalendar() {
     // Heat map — only show for bid period days, percentile-based levels
     const count = inBidPeriod || isThisMonth ? (dayCountMap.get(dateKey) || 0) : 0;
     if (!_calFavMode && count > 0 && (isThisMonth || inBidPeriod)) {
-      if      (count >  p80) cell.classList.add('heat-4');
-      else if (count >= p60) cell.classList.add('heat-3');
-      else if (count >= p40) cell.classList.add('heat-2');
-      else if (count >= p20) cell.classList.add('heat-1');
+      if      (count >  p90) cell.classList.add('heat-10');
+      else if (count >= p80) cell.classList.add('heat-9');
+      else if (count >= p70) cell.classList.add('heat-8');
+      else if (count >= p60) cell.classList.add('heat-7');
+      else if (count >= p50) cell.classList.add('heat-6');
+      else if (count >= p40) cell.classList.add('heat-5');
+      else if (count >= p30) cell.classList.add('heat-4');
+      else if (count >= p20) cell.classList.add('heat-3');
+      else if (count >= p10) cell.classList.add('heat-2');
       else                   cell.classList.add('heat-1');
     }
 
@@ -11815,7 +12007,7 @@ function rotParseText(raw) {
     const rt = line.match(/ACTUAL\s+REPORT\s+TIME\s+(\d{3,4})\s*$/i);
     if (rt) r.reportTime = hhmm(rt[1]);
 
-    const pn = line.match(/[A-Z]\s+\d{7}\s+([A-Z]+[,.]\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/);
+    const pn = line.match(/[A-Z]\s+\d{6,7}\s+([A-Z]+[,.]?\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/i);
     if (pn) r.pilotName = pn[1];
   }
 
@@ -11823,7 +12015,7 @@ function rotParseText(raw) {
   // Requires: CITY [sep] TIME  CITY [sep] TIME  block(d.dd)
   // sep = space or period (OCR artifact); made optional (?) to handle photo OCR
   // merging city+time like "LGA1317" without separator
-  const LEG_CORE = /([A-Z][A-Z0-9]{2})[\s.]?(\d{4})\s*([A-Z][A-Z0-9]{2})[\s.]?(\d{4})[^.]*?(\d+\.\d+)/;
+  const LEG_CORE = /([A-Z][A-Z0-9]{2})[\s.]?(\d{3,4})\s*([A-Z][A-Z0-9]{2})[\s.]?(\d{3,4})[^.]*?(\d+\.\d+)/;
 
 
   let curDay  = null;
@@ -11836,7 +12028,7 @@ function rotParseText(raw) {
     if (!trim) continue;
 
     // ── Pilot name ────────────────────────────────────────
-    const pn = trim.match(/[A-Z]\s+\d{7}\s+([A-Z]+[,.]\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/);
+    const pn = trim.match(/[A-Z]\s+\d{6,7}\s+([A-Z]+[,.]?\s+[A-Z]+(?:\s+[A-Z]+)?)\s+RES/i);
     if (pn && !r.pilotName) { r.pilotName = pn[1]; continue; }
 
     // ── Report times for subsequent days ─────────────────
@@ -11847,7 +12039,7 @@ function rotParseText(raw) {
     if (arm) pendingActRpt = { time: ft(arm[1]), day: parseInt(arm[2]) };
 
     // ── Layover: "BOS  15.10/THE DAGNY BOSTON" ────────────
-    const lm = trim.match(/^([A-Z][A-Z0-9]{2})\s+([\d]+\.[\d]+)\/(.+)/);
+    const lm = trim.match(/^([A-Z][A-Z0-9]{2})\s+([\d]+\.[\d]+)[\/\s]+(.+)/);
     if (lm && curDay) {
       // Strip trailing pay codes like "4.41BL", "5.22BL" from hotel name
       const rawHotel = lm[3].trim().replace(/(\s+[\d.]+[A-Z]{2,5})+\s*$/, '').trim();
@@ -11856,7 +12048,7 @@ function rotParseText(raw) {
     }
 
     // ── PWA FDP ───────────────────────────────────────────
-    const fdpm = trim.match(/PWA\s+FDP\/SKD\s+MAX\/ACT\s+MAX\s+([\d.]+)\/\s*([\d.]+)\/\s*([\d.]+)/i);
+    const fdpm = trim.match(/PWA\s+FDP.*?MAX.*?([\d.]+)[\/\s]+([\d.]+)[\/\s]+([\d.]+)/i);
     if (fdpm && curDay) {
       // Only capture first PWA line per day (A- and B- acclimation lines both appear; use first)
       if (!curDay.fdp) {
@@ -11864,7 +12056,7 @@ function rotParseText(raw) {
                        pwaMax:null, maxBlk:null };
         // Next line: "A- LAST ACCLIMATED CITY-xxx REST CLASS-  pwaFDP/pwaSked/MaxBlk"
         const nxt = (lines[i+1]||'').trim();
-        const pw2 = nxt.match(/([\d.]+)\/\s*([\d.]+)\/\s*([\d.]+)/);
+        const pw2 = nxt.match(/([\d.]+)[\/\s]+([\d.]+)[\/\s]+([\d.]+)/);
         if (pw2) { curDay.fdp.pwaMax=hhmm(pw2[1]); curDay.fdp.maxBlk=hhmm(pw2[3]); }
       }
       continue;
